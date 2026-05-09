@@ -85,7 +85,8 @@ begin
   // Read existing content (empty string if file doesn't exist)
   Existing := '';
   if FileExists(ClaudeMdPath) then
-    LoadStringFromFile(ClaudeMdPath, Existing);
+    if not LoadStringFromFile(ClaudeMdPath, Existing) then
+      Existing := '';
 
   // Only inject if not already present
   if Pos('claude-gallery-start', Existing) = 0 then
@@ -107,7 +108,7 @@ begin
   ClaudeMdPath := GetClaudeMdPath;
   if not FileExists(ClaudeMdPath) then Exit;
 
-  LoadStringFromFile(ClaudeMdPath, Content);
+  if not LoadStringFromFile(ClaudeMdPath, Content) then Exit;
   StartTag := '<!-- claude-gallery-start -->';
   EndTag   := '<!-- claude-gallery-end -->';
   StartPos := Pos(StartTag, Content);
