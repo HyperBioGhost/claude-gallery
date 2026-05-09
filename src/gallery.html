@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Claude Gallery</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0f0f14;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      width: 220px;
+      min-width: 220px;
+      background: #16161f;
+      border-right: 1px solid #2a2a3a;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #sidebar-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid #2a2a3a;
+      font-size: 0.68rem;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: #00ffcc;
+      text-shadow: 0 0 10px #00ffcc66;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+    }
+    #conn-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #333;
+      flex-shrink: 0;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    #conn-dot.on   { background: #00ffcc; box-shadow: 0 0 8px #00ffcc; }
+    #conn-dot.ping { background: #fff;    box-shadow: 0 0 14px #fff; }
+
+    #file-list { overflow-y: auto; flex: 1; padding: 6px 0; }
+    #file-list::-webkit-scrollbar { width: 4px; }
+    #file-list::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 2px; }
+
+    .file-item {
+      padding: 9px 14px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      transition: background 0.12s, color 0.12s;
+      font-size: 0.78rem;
+      color: #888;
+      overflow: hidden;
+    }
+    .file-item:hover  { background: #1e1e2a; color: #ddd; }
+    .file-item.active { border-left-color: #00ffcc; background: #1a1a28; color: #00ffcc; }
+    .file-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .file-meta { font-size: 0.6rem; color: #444; margin-top: 2px; display: flex; gap: 6px; align-items: center; }
+    .badge {
+      display: inline-block;
+      font-size: 0.58rem;
+      padding: 1px 4px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .b-html { background: #e34c2618; color: #e34c26; }
+    .b-svg  { background: #ffb30018; color: #ffb300; }
+    .b-img  { background: #4caf5018; color: #4caf50; }
+    .b-md   { background: #2196f318; color: #2196f3; }
+    .b-code { background: #9c27b018; color: #ce93d8; }
+    .b-data { background: #ff572218; color: #ff7043; }
+    .b-file { background: #55555518; color: #888; }
+
+    @keyframes flashin {
+      0%   { background: #00ffcc18; border-left-color: #00ffcc; }
+      100% { background: transparent; border-left-color: transparent; }
+    }
+    .file-item.new { animation: flashin 2.5s ease-out forwards; }
+
+    /* ── Main ── */
+    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    #toolbar {
+      padding: 9px 16px;
+      background: #16161f;
+      border-bottom: 1px solid #2a2a3a;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.73rem;
+      color: #555;
+      user-select: none;
+    }
+    #current-file { flex: 1; color: #bbb; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tb-btn {
+      background: #1e1e2a;
+      border: 1px solid #2a2a3a;
+      color: #777;
+      padding: 4px 11px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.7rem;
+      text-decoration: none;
+      transition: all 0.12s;
+      white-space: nowrap;
+    }
+    .tb-btn:hover { background: #2a2a3a; color: #fff; }
+
+    /* ── Preview ── */
+    #preview-area { flex: 1; overflow: hidden; position: relative; }
+    iframe { width: 100%; height: 100%; border: none; }
+    #text-view {
+      width: 100%; height: 100%;
+      overflow: auto;
+      padding: 24px 28px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+      font-size: 0.78rem;
+      line-height: 1.65;
+      color: #b0b0c0;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: #0f0f14;
+    }
+    #text-view::-webkit-scrollbar { width: 6px; }
+    #text-view::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+    #img-view {
+      width: 100%; height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: auto;
+      background: #0f0f14;
+    }
+    #img-view img {
+      max-width: 92%;
+      max-height: 92%;
+      object-fit: contain;
+      border-radius: 6px;
+      box-shadow: 0 8px 48px #00000088;
+    }
+    #empty {
+      width: 100%; height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      color: #222;
+      background: #0f0f14;
+      user-select: none;
+    }
+    #empty svg { opacity: 0.15; }
+    #empty .msg { font-size: 0.78rem; letter-spacing: 3px; text-transform: uppercase; color: #333; }
+
+    /* ── Status bar ── */
+    #statusbar {
+      padding: 4px 16px;
+      background: #0c0c11;
+      border-top: 1px solid #1a1a24;
+      font-size: 0.62rem;
+      color: #383848;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+    #statusbar span:last-child { margin-left: auto; }
+  </style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div id="sidebar-header">
+    <div id="conn-dot"></div>
+    Claude Gallery
+  </div>
+  <div id="file-list"></div>
+</div>
+
+<div id="main">
+  <div id="toolbar">
+    <span id="current-file">No artifact selected</span>
+    <a id="btn-open" class="tb-btn" href="#" target="_blank">Open in tab ↗</a>
+    <button id="btn-clear" class="tb-btn">Clear all</button>
+  </div>
+  <div id="preview-area">
+    <div id="empty">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+      </svg>
+      <div class="msg">Waiting for artifacts</div>
+    </div>
+  </div>
+  <div id="statusbar">
+    <span id="s-count">0 artifacts</span>
+    <span id="s-conn">Connecting…</span>
+    <span>localhost:7477</span>
+  </div>
+</div>
+
+<script>
+  const dot      = document.getElementById('conn-dot');
+  const sConn    = document.getElementById('s-conn');
+  const sCount   = document.getElementById('s-count');
+  const fileList = document.getElementById('file-list');
+  const area     = document.getElementById('preview-area');
+  const btnOpen  = document.getElementById('btn-open');
+  const curFile  = document.getElementById('current-file');
+
+  let files = [], active = null;
+
+  // ── Utilities ──
+  function getExt(n) { return n.includes('.') ? n.split('.').pop().toLowerCase() : ''; }
+  function badgeClass(n) {
+    const e = getExt(n);
+    if (['html','htm'].includes(e)) return 'b-html';
+    if (e === 'svg')                return 'b-svg';
+    if (['png','jpg','jpeg','gif','webp'].includes(e)) return 'b-img';
+    if (e === 'md')                 return 'b-md';
+    if (['js','ts','py','css','sh'].includes(e)) return 'b-code';
+    if (['json','csv'].includes(e)) return 'b-data';
+    return 'b-file';
+  }
+  function badgeLabel(n) {
+    const e = getExt(n);
+    const map = { htm:'html', jpeg:'jpg' };
+    return map[e] || e || 'file';
+  }
+  function timeAgo(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 5)    return 'just now';
+    if (s < 60)   return s + 's ago';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    return Math.floor(s/3600) + 'h ago';
+  }
+
+  // ── Render sidebar ──
+  function renderList(flashName) {
+    fileList.innerHTML = '';
+    files.forEach(f => {
+      const div = document.createElement('div');
+      div.className = 'file-item'
+        + (active && active.name === f.name ? ' active' : '')
+        + (f.name === flashName ? ' new' : '');
+      div.innerHTML = `
+        <div class="file-name">${f.name}</div>
+        <div class="file-meta">
+          <span class="badge ${badgeClass(f.name)}">${badgeLabel(f.name)}</span>
+          ${timeAgo(f.mtime)}
+        </div>`;
+      div.onclick = () => selectFile(f);
+      fileList.appendChild(div);
+    });
+    sCount.textContent = files.length + ' artifact' + (files.length !== 1 ? 's' : '');
+  }
+
+  // ── Preview ──
+  function selectFile(f) {
+    active = f;
+    curFile.textContent = f.name;
+    btnOpen.href = '/files/' + encodeURIComponent(f.name);
+    area.innerHTML = '';
+
+    const e = getExt(f.name);
+    const url = '/files/' + encodeURIComponent(f.name);
+
+    if (['html','htm'].includes(e)) {
+      const fr = document.createElement('iframe');
+      fr.src = url;
+      fr.sandbox = 'allow-scripts allow-same-origin allow-forms';
+      area.appendChild(fr);
+    } else if (e === 'svg') {
+      const fr = document.createElement('iframe');
+      fr.src = url;
+      area.appendChild(fr);
+    } else if (['png','jpg','jpeg','gif','webp'].includes(e)) {
+      const wrap = document.createElement('div');
+      wrap.id = 'img-view';
+      const img = document.createElement('img');
+      img.src = url;
+      wrap.appendChild(img);
+      area.appendChild(wrap);
+    } else {
+      fetch(url).then(r => r.text()).then(text => {
+        const pre = document.createElement('div');
+        pre.id = 'text-view';
+        pre.textContent = text;
+        area.appendChild(pre);
+      });
+    }
+    renderList();
+  }
+
+  // ── Clear all ──
+  document.getElementById('btn-clear').onclick = async () => {
+    if (!confirm('Remove all artifacts from the gallery? Files will be deleted.')) return;
+    await fetch('/clear', { method: 'POST' });
+    files = []; active = null;
+    curFile.textContent = 'No artifact selected';
+    btnOpen.href = '#';
+    area.innerHTML = '<div id="empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><div class="msg">Waiting for artifacts</div></div>';
+    renderList();
+  };
+
+  // ── Initial load ──
+  async function loadList() {
+    try {
+      const data = await fetch('/list').then(r => r.json());
+      files = data.files || [];
+      renderList();
+      if (files.length > 0) selectFile(files[0]);
+    } catch(e) {}
+  }
+
+  // ── SSE connection ──
+  function connect() {
+    const es = new EventSource('/events');
+    es.onopen = () => {
+      dot.className = 'on';
+      sConn.textContent = 'Connected';
+    };
+    es.onmessage = e => {
+      const { file: fname } = JSON.parse(e.data);
+      // flash dot
+      dot.className = 'ping';
+      setTimeout(() => dot.className = 'on', 500);
+      // upsert file entry
+      const idx = files.findIndex(f => f.name === fname);
+      const entry = { name: fname, mtime: Date.now() };
+      if (idx >= 0) files[idx] = entry; else files.unshift(entry);
+      renderList(fname);
+      selectFile(entry);
+    };
+    es.onerror = () => {
+      dot.className = '';
+      sConn.textContent = 'Reconnecting…';
+      es.close();
+      setTimeout(connect, 3000);
+    };
+  }
+
+  loadList();
+  connect();
+</script>
+</body>
+</html>

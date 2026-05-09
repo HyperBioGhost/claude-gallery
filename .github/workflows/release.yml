@@ -1,0 +1,68 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build server .exe
+        run: pyinstaller build/claude-gallery-server.spec --distpath build/windows/dist
+
+      - name: Build installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.4
+        with:
+          path: build/windows/installer.iss
+          options: /O+
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: build/windows/dist/ClaudeGallery-Setup.exe
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build .pkg
+        run: bash build/mac/build-pkg.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-installer
+          path: build/mac/dist/ClaudeGallery-*.pkg
+
+  release:
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            windows-installer/ClaudeGallery-Setup.exe
+            mac-installer/ClaudeGallery-*.pkg
+          generate_release_notes: true
