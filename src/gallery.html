@@ -275,7 +275,7 @@
     if (['html','htm'].includes(e)) {
       const fr = document.createElement('iframe');
       fr.src = url;
-      fr.sandbox = 'allow-scripts allow-same-origin allow-forms';
+      fr.sandbox = 'allow-scripts allow-same-origin allow-forms allow-pointer-lock';
       area.appendChild(fr);
     } else if (e === 'svg') {
       const fr = document.createElement('iframe');
