@@ -40,7 +40,7 @@ Source: "..\..\src\gallery.html"; DestDir: "{userdocs}\ClaudeGallery"; Flags: ig
 Name: "{userdocs}\ClaudeGallery\artifacts"
 
 [Tasks]
-Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts"; GroupDescription: "Startup:"; Flags: checked
+Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts"; GroupDescription: "Startup:"
 
 [Run]
 ; Start server immediately after install
