@@ -1,6 +1,6 @@
 # Claude Gallery
 
-A tiny local app that gives Claude Code a live artifact viewer — so when Claude generates HTML, SVGs, charts, code, or data files, they appear in a browser gallery instantly.
+A tiny local app that gives Claude Code in Kiro a live artifact viewer — so when Claude generates HTML, SVGs, charts, code, or data files, they appear in a browser gallery instantly.
 
 ## Install
 
