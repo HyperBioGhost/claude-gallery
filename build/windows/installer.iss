@@ -83,10 +83,9 @@ begin
   ForceDirectories(ExtractFileDir(ClaudeMdPath));
 
   // Read existing content (empty string if file doesn't exist)
+  Existing := '';
   if FileExists(ClaudeMdPath) then
-    LoadStringFromFile(ClaudeMdPath, Existing)
-  else
-    Existing := '';
+    LoadStringFromFile(ClaudeMdPath, Existing);
 
   // Only inject if not already present
   if Pos('claude-gallery-start', Existing) = 0 then
