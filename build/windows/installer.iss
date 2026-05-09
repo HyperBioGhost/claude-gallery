@@ -5,7 +5,7 @@
 #define AppName "Claude Gallery"
 #define AppVersion "1.0.0"
 #define AppPublisher "Claude Gallery"
-#define AppURL "https://github.com/your-org/claude-gallery"
+#define AppURL "https://github.com/HyperBioGhost/claude-gallery"
 #define AppExeName "claude-gallery-server.exe"
 #define ServicePort "7477"
 
@@ -26,9 +26,6 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#AppExeName}
-SetupIconFile=..\..\assets\icon.ico
-WizardImageFile=..\..\assets\wizard-sidebar.bmp
-WizardSmallImageFile=..\..\assets\wizard-top.bmp
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

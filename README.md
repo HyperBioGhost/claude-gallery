@@ -5,10 +5,10 @@ A tiny local app that gives Claude Code a live artifact viewer — so when Claud
 ## Install
 
 ### Windows
-Download `ClaudeGallery-Setup.exe` from [Releases](../../releases/latest) and run it. Next → Next → Finish.
+Download `ClaudeGallery-Setup.exe` from [Releases](https://github.com/HyperBioGhost/claude-gallery/releases/latest) and run it. Next → Next → Finish.
 
 ### Mac
-Download `ClaudeGallery.pkg` from [Releases](../../releases/latest) and open it. Continue → Install.
+Download `ClaudeGallery.pkg` from [Releases](https://github.com/HyperBioGhost/claude-gallery/releases/latest) and open it. Continue → Install.
 
 ## That's it
 
