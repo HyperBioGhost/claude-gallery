@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Background circle -->
+  <circle cx="128" cy="128" r="120" fill="#0f0f14"/>
+
+  <!-- Outer ring -->
+  <circle cx="128" cy="128" r="118" fill="none" stroke="#00ffcc" stroke-width="3" opacity="0.3"/>
+
+  <!-- Grid cells — 3x3 arrangement suggesting a gallery -->
+  <!-- Row 1 -->
+  <rect x="52"  y="52"  width="52" height="52" rx="8" fill="#00ffcc" opacity="0.15"/>
+  <rect x="114" y="52"  width="52" height="52" rx="8" fill="#00ffcc" opacity="0.4"/>
+  <rect x="176" y="52"  width="28" height="52" rx="8" fill="#00ffcc" opacity="0.2"/>
+
+  <!-- Row 2 -->
+  <rect x="52"  y="114" width="52" height="52" rx="8" fill="#00ffcc" opacity="0.5"/>
+  <rect x="114" y="114" width="52" height="52" rx="8" fill="#00ffcc" opacity="0.9"/>
+  <rect x="176" y="114" width="28" height="52" rx="8" fill="#00ffcc" opacity="0.35"/>
+
+  <!-- Row 3 -->
+  <rect x="52"  y="176" width="52" height="28" rx="8" fill="#00ffcc" opacity="0.25"/>
+  <rect x="114" y="176" width="52" height="28" rx="8" fill="#00ffcc" opacity="0.5"/>
+  <rect x="176" y="176" width="28" height="28" rx="8" fill="#00ffcc" opacity="0.15"/>
+
+  <!-- Center glow -->
+  <circle cx="140" cy="140" r="30" fill="#00ffcc" opacity="0.08"/>
+</svg>

@@ -25,6 +25,7 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#AppExeName}
+SetupIconFile=..\..\assets\icon.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

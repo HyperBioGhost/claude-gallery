@@ -36,6 +36,7 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,      # no console window on Windows
+    icon='../assets/icon.ico',
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
