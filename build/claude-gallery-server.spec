@@ -8,7 +8,11 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['email', 'email.mime', 'email.mime.text', 'http.server', 'http.client'],
+    hiddenimports=[
+        'email', 'email.mime', 'email.mime.text',
+        'email.utils', 'email.message', 'email.header',
+        'http.server', 'http.client',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

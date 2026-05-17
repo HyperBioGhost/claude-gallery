@@ -1,10 +1,11 @@
-name: Build & Release
+name: Build, Test & Release
 
 on:
   push:
     tags: ['v*']
 
 jobs:
+  # ── Build Windows installer ─────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
     steps:
@@ -31,6 +32,8 @@ jobs:
           name: windows-installer
           path: build/windows/dist/ClaudeGallery-Setup.exe
 
+
+  # ── Build macOS pkg ─────────────────────────────────────────────────
   build-mac:
     runs-on: macos-latest
     steps:
@@ -51,8 +54,87 @@ jobs:
           name: mac-installer
           path: build/mac/dist/ClaudeGallery-*.pkg
 
+
+  # ── Smoke test Windows ──────────────────────────────────────────────
+  test-windows:
+    needs: build-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: dist
+
+      - name: Install silently
+        shell: powershell
+        run: |
+          $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
+          Write-Host "Installing $($exe.FullName)"
+          Start-Process -FilePath $exe.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+
+      - name: Start server
+        shell: powershell
+        run: |
+          $server = "$env:LOCALAPPDATA\ClaudeGallery\claude-gallery-server.exe"
+          if (Test-Path $server) {
+            Start-Process -FilePath $server -WindowStyle Hidden
+          } else {
+            Write-Host "Server binary not found at $server"
+            Get-ChildItem "$env:LOCALAPPDATA\ClaudeGallery" -ErrorAction SilentlyContinue
+            exit 1
+          }
+
+      - name: Run smoke tests
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File tests\smoke.ps1
+
+      - name: Cleanup
+        if: always()
+        shell: powershell
+        run: taskkill /F /IM claude-gallery-server.exe 2>$null; exit 0
+
+
+  # ── Smoke test macOS ────────────────────────────────────────────────
+  test-mac:
+    needs: build-mac
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-installer
+          path: dist
+
+      - name: Install pkg
+        run: |
+          pkg=$(ls dist/*.pkg | head -1)
+          echo "Installing $pkg"
+          sudo installer -pkg "$pkg" -target /
+
+      - name: Copy gallery.html to user home (postinstall step for CI user)
+        run: |
+          mkdir -p "$HOME/ClaudeGallery/artifacts"
+          cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
+
+      - name: Load launchd agent
+        run: |
+          launchctl load -w ~/Library/LaunchAgents/com.claude-gallery.server.plist || true
+
+      - name: Run smoke tests
+        run: bash tests/smoke.sh
+
+      - name: Cleanup
+        if: always()
+        run: |
+          launchctl unload -w ~/Library/LaunchAgents/com.claude-gallery.server.plist 2>/dev/null || true
+
+
+  # ── Publish release (only if both tests pass) ───────────────────────
   release:
-    needs: [build-windows, build-mac]
+    needs: [test-windows, test-mac]
     runs-on: ubuntu-latest
     permissions:
       contents: write

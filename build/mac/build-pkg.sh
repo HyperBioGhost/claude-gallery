@@ -24,27 +24,28 @@ STAGE="$OUT_DIR/stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE$INSTALL_DIR"
 mkdir -p "$STAGE/Library/LaunchAgents"
-mkdir -p "$STAGE$HOME/ClaudeGallery"
 
 # Server binary
 cp "$OUT_DIR/bin/claude-gallery-server" "$STAGE$INSTALL_DIR/"
 
-# Gallery HTML (goes to ~/ClaudeGallery/)
-cp src/gallery.html "$STAGE$HOME/ClaudeGallery/"
+# Gallery HTML — installed to a fixed system path; postinstall copies to user home
+mkdir -p "$STAGE/Library/ClaudeGallery"
+cp src/gallery.html "$STAGE/Library/ClaudeGallery/"
 
-# launchd plist for auto-start on login
-cat > "$STAGE/Library/LaunchAgents/com.claude-gallery.server.plist" <<PLIST
+# launchd plist — use ~ which launchd expands to the loading user's home at runtime
+# Do NOT embed $HOME here — this plist is installed system-wide and loaded per-user
+cat > "$STAGE/Library/LaunchAgents/com.claude-gallery.server.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>             <string>com.claude-gallery.server</string>
-    <key>ProgramArguments</key>  <array><string>$INSTALL_DIR/claude-gallery-server</string></array>
+    <key>ProgramArguments</key>  <array><string>/usr/local/bin/claude-gallery-server</string></array>
     <key>RunAtLoad</key>         <true/>
     <key>KeepAlive</key>         <true/>
-    <key>StandardOutPath</key>   <string>$HOME/ClaudeGallery/server.log</string>
-    <key>StandardErrorPath</key> <string>$HOME/ClaudeGallery/server.log</string>
+    <key>StandardOutPath</key>   <string>/tmp/claude-gallery.log</string>
+    <key>StandardErrorPath</key> <string>/tmp/claude-gallery.log</string>
 </dict>
 </plist>
 PLIST
@@ -58,6 +59,9 @@ set -e
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 mkdir -p "$(dirname "$CLAUDE_MD")"
 mkdir -p "$HOME/ClaudeGallery/artifacts"
+
+# Copy gallery.html from system install location to user home
+cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
 
 MARKER="claude-gallery-start"
 if ! grep -q "$MARKER" "$CLAUDE_MD" 2>/dev/null; then
