@@ -1,4 +1,4 @@
-# Claude Gallery — Windows Smoke Tests
+# Claude Gallery - Windows Smoke Tests
 # Run after installation to verify the server is working correctly.
 # Usage: powershell -ExecutionPolicy Bypass -File tests\smoke.ps1
 # Exit code 0 = all tests passed, 1 = one or more failed.
@@ -16,7 +16,7 @@ function Pass($name) {
     $script:results += @{ name=$name; ok=$true }
 }
 function Fail($name, $reason) {
-    Write-Host "  FAIL  $name — $reason" -ForegroundColor Red
+    Write-Host "  FAIL  $name - $reason" -ForegroundColor Red
     $script:failed++
     $script:results += @{ name=$name; ok=$false; reason=$reason }
 }
