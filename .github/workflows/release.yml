@@ -14,23 +14,18 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install PyInstaller
         run: pip install pyinstaller
-
       - name: Build server .exe
         run: pyinstaller build/claude-gallery-server.spec --distpath build/windows/dist
-
       - name: Build installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.4
         with:
           path: build/windows/installer.iss
           options: /O+
-
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
@@ -42,17 +37,13 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install PyInstaller
         run: pip install pyinstaller
-
       - name: Build .pkg
         run: bash build/mac/build-pkg.sh
-
       - uses: actions/upload-artifact@v4
         with:
           name: mac-installer
@@ -72,21 +63,35 @@ jobs:
           name: windows-installer
           path: dist
 
-      - name: Install silently
-        # [Run] no longer has any blocking entries — completes in ~30s
-        timeout-minutes: 3
+      - name: Install silently with full log
+        timeout-minutes: 5
         shell: powershell
         run: |
           $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
-          Write-Host "Installing $($exe.FullName)"
+          Write-Host "=== Installing: $($exe.FullName) ==="
+          # /LOG= writes a detailed Inno Setup install log
+          $log = "$env:TEMP\claude-gallery-install.log"
           Start-Process -FilePath $exe.FullName `
-            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$log" `
             -Wait
-          Write-Host "Install complete"
-          Get-ChildItem "$env:LOCALAPPDATA\ClaudeGallery" -ErrorAction SilentlyContinue
+          Write-Host "=== Install process returned ==="
+          Write-Host "=== Install log: ==="
+          if (Test-Path $log) { Get-Content $log } else { Write-Host "No log file found" }
+          Write-Host "=== LOCALAPPDATA\ClaudeGallery contents: ==="
+          Get-ChildItem "$env:LOCALAPPDATA\ClaudeGallery" -Recurse -ErrorAction SilentlyContinue
+          Write-Host "=== CLAUDE.md contents: ==="
+          $md = "$env:USERPROFILE\.claude\CLAUDE.md"
+          if (Test-Path $md) { Get-Content $md } else { Write-Host "CLAUDE.md not found at $md" }
+
+      - name: Check server process
+        shell: powershell
+        run: |
+          Write-Host "=== Processes containing 'claude': ==="
+          Get-Process | Where-Object { $_.Name -like "*claude*" } | Format-List
+          Write-Host "=== Port 7477 listeners: ==="
+          netstat -ano | Select-String "7477"
 
       - name: Run smoke tests
-        # Server was started by installer [Run] nowait entry — just wait for it
         timeout-minutes: 5
         shell: powershell
         run: powershell -ExecutionPolicy Bypass -File tests\smoke.ps1 -StartupTimeout 30
@@ -110,12 +115,18 @@ jobs:
           name: mac-installer
           path: dist
 
-      - name: Install pkg
+      - name: Install pkg with log
         timeout-minutes: 5
         run: |
           pkg=$(ls dist/*.pkg | head -1)
-          echo "Installing $pkg"
-          sudo installer -pkg "$pkg" -target /
+          echo "=== Installing: $pkg ==="
+          sudo installer -pkg "$pkg" -target / -verbose
+          echo "=== /usr/local/bin contents: ==="
+          ls -la /usr/local/bin/claude* 2>/dev/null || echo "no claude binary found"
+          echo "=== /Library/ClaudeGallery contents: ==="
+          ls -la /Library/ClaudeGallery/ 2>/dev/null || echo "/Library/ClaudeGallery not found"
+          echo "=== LaunchAgents: ==="
+          ls -la ~/Library/LaunchAgents/com.claude* 2>/dev/null || echo "no plist found"
 
       - name: Set up user home directory
         run: |
@@ -123,13 +134,22 @@ jobs:
           sudo cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
           sudo chown -R "$USER" "$HOME/ClaudeGallery"
 
-      - name: Start server directly
-        # Skip launchd in CI — headless runners don't have a GUI session
-        # We test the binary directly; launchd is OS plumbing we don't need to verify
+      - name: Try starting server and capture output
         timeout-minutes: 2
         run: |
+          echo "=== Binary info: ==="
+          file /usr/local/bin/claude-gallery-server 2>/dev/null || echo "binary not found"
+          ls -la /usr/local/bin/claude-gallery-server 2>/dev/null || echo "binary not found"
+          echo "=== Starting server: ==="
           /usr/local/bin/claude-gallery-server &
+          SERVER_PID=$!
           sleep 3
+          echo "=== Server PID: $SERVER_PID ==="
+          ps aux | grep claude-gallery | grep -v grep || echo "server process not found"
+          echo "=== Port 7477: ==="
+          lsof -i :7477 || echo "nothing on port 7477"
+          echo "=== curl test: ==="
+          curl -v http://localhost:7477/list 2>&1 || echo "curl failed"
 
       - name: Run smoke tests
         timeout-minutes: 5
@@ -148,7 +168,6 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
