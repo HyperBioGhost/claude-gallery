@@ -147,13 +147,7 @@ jobs:
           mkdir -p "$HOME/.claude"
           CLAUDE_MD="$HOME/.claude/CLAUDE.md"
           if ! grep -q "claude-gallery-start" "$CLAUDE_MD" 2>/dev/null; then
-            cat >> "$CLAUDE_MD" <<'INJECT'
-
-<!-- claude-gallery-start -->
-# Claude Gallery
-A local artifact viewer is running at http://localhost:7477.
-<!-- claude-gallery-end -->
-INJECT
+            printf '\n<!-- claude-gallery-start -->\n# Claude Gallery\nA local artifact viewer is running at http://localhost:7477.\n<!-- claude-gallery-end -->\n' >> "$CLAUDE_MD"
           fi
 
       - name: Start server
@@ -161,22 +155,8 @@ INJECT
         run: |
           # Double-fork via Python so the server is fully reparented to PID 1
           # and survives when this step's shell exits.
-          python3 - <<'EOF'
-          import os, subprocess, sys
-          pid = os.fork()
-          if pid == 0:
-              os.setsid()
-              pid2 = os.fork()
-              if pid2 == 0:
-                  with open('/tmp/claude-gallery.log', 'w') as log:
-                      subprocess.Popen(
-                          ['/usr/local/bin/claude-gallery-server'],
-                          stdout=log, stderr=log,
-                          close_fds=True,
-                      )
-              os._exit(0)
-          os.waitpid(pid, 0)
-          EOF
+          printf 'import os, subprocess\npid = os.fork()\nif pid == 0:\n    os.setsid()\n    pid2 = os.fork()\n    if pid2 == 0:\n        log = open("/tmp/claude-gallery.log", "w")\n        subprocess.Popen(["/usr/local/bin/claude-gallery-server"], stdout=log, stderr=log, close_fds=True)\n    os._exit(0)\nos.waitpid(pid, 0)\n' > /tmp/start-gallery.py
+          python3 /tmp/start-gallery.py
           sleep 4
           cat /tmp/claude-gallery.log || true
           lsof -i :7477 || echo "nothing on port 7477 yet"
