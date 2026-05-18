@@ -103,14 +103,14 @@ jobs:
           $docs = [Environment]::GetFolderPath('MyDocuments')
           New-Item -ItemType Directory -Force -Path "$docs\ClaudeGallery\artifacts" | Out-Null
           Copy-Item "$env:LOCALAPPDATA\ClaudeGallery\gallery.html" "$docs\ClaudeGallery\gallery.html" -Force -ErrorAction SilentlyContinue
-          # console=True binary: redirect stdout+stderr to a log file for diagnostics
-          $log = "$env:TEMP\claude-gallery-server.log"
-          Start-Process -FilePath $server -RedirectStandardOutput $log -RedirectStandardError "$env:TEMP\claude-gallery-server-err.log" -NoNewWindow
+          # UseShellExecute=true detaches the child from this job object so it
+          # survives when this step's PowerShell process exits.
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = $server
+          $psi.UseShellExecute = $true
+          $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+          [System.Diagnostics.Process]::Start($psi) | Out-Null
           Start-Sleep -Seconds 5
-          Write-Host "=== Server stdout ==="
-          Get-Content $log -ErrorAction SilentlyContinue
-          Write-Host "=== Server stderr ==="
-          Get-Content "$env:TEMP\claude-gallery-server-err.log" -ErrorAction SilentlyContinue
           Write-Host "=== Port check ==="
           netstat -ano | Select-String "7477"
 
