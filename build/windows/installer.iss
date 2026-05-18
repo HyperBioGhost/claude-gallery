@@ -36,22 +36,22 @@ FinishedLabel=Open Kiro or Claude Code and start generating%n— your artifacts 
 
 [Files]
 Source: "dist\{#AppExeName}";          DestDir: "{app}";                  Flags: ignoreversion
-Source: "..\..\src\gallery.html";      DestDir: "{userdocs}\ClaudeGallery"; Flags: ignoreversion
+Source: "..\..\src\gallery.html";      DestDir: "{%USERPROFILE%}\ClaudeGallery"; Flags: ignoreversion
 Source: "..\..\src\inject-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\remove-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 
 [Dirs]
-Name: "{userdocs}\ClaudeGallery\artifacts"
+Name: "{%USERPROFILE%}\ClaudeGallery\artifacts"
 
 [Tasks]
 Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts"; GroupDescription: "Startup:"
 
 [Run]
-; Inject CLAUDE.md instructions
-Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\inject-claude.ps1"""; Flags: runhidden waituntilterminated
+; Inject CLAUDE.md instructions — nowait so the installer never hangs
+Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\inject-claude.ps1"""; Flags: runhidden nowait
 ; Register auto-start
-Filename: "reg.exe"; Parameters: "add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v ClaudeGallery /t REG_SZ /d """"""{app}\{#AppExeName}"""""" /f"; Flags: runhidden waituntilterminated; Tasks: startupentry
-; Start server silently — fire and forget, does not block the installer
+Filename: "reg.exe"; Parameters: "add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v ClaudeGallery /t REG_SZ /d """"""{app}\{#AppExeName}"""""" /f"; Flags: runhidden nowait; Tasks: startupentry
+; Start server silently
 Filename: "{app}\{#AppExeName}"; Flags: nowait runhidden
 
 [UninstallRun]

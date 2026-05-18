@@ -142,19 +142,42 @@ jobs:
 
       - name: Set up user home directory
         run: |
-          sudo mkdir -p "$HOME/ClaudeGallery/artifacts"
-          sudo cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
-          sudo chown -R "$USER" "$HOME/ClaudeGallery"
+          mkdir -p "$HOME/ClaudeGallery/artifacts"
+          cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
+          mkdir -p "$HOME/.claude"
+          CLAUDE_MD="$HOME/.claude/CLAUDE.md"
+          if ! grep -q "claude-gallery-start" "$CLAUDE_MD" 2>/dev/null; then
+            cat >> "$CLAUDE_MD" <<'INJECT'
+
+<!-- claude-gallery-start -->
+# Claude Gallery
+A local artifact viewer is running at http://localhost:7477.
+<!-- claude-gallery-end -->
+INJECT
+          fi
 
       - name: Start server
         timeout-minutes: 2
         run: |
-          # nohup + setsid detaches the process from this shell
-          # so it survives when this step exits
-          nohup /usr/local/bin/claude-gallery-server > /tmp/claude-gallery.log 2>&1 &
-          echo $! > /tmp/claude-gallery.pid
-          sleep 3
-          echo "Server PID: $(cat /tmp/claude-gallery.pid)"
+          # Double-fork via Python so the server is fully reparented to PID 1
+          # and survives when this step's shell exits.
+          python3 - <<'EOF'
+          import os, subprocess, sys
+          pid = os.fork()
+          if pid == 0:
+              os.setsid()
+              pid2 = os.fork()
+              if pid2 == 0:
+                  with open('/tmp/claude-gallery.log', 'w') as log:
+                      subprocess.Popen(
+                          ['/usr/local/bin/claude-gallery-server'],
+                          stdout=log, stderr=log,
+                          close_fds=True,
+                      )
+              os._exit(0)
+          os.waitpid(pid, 0)
+          EOF
+          sleep 4
           cat /tmp/claude-gallery.log || true
           lsof -i :7477 || echo "nothing on port 7477 yet"
 

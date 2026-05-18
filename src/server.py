@@ -6,11 +6,17 @@ Port 7477. Zero polling — browser only updates when /notify is called.
 Artifact ordering is tracked in artifacts.json (insertion order, newest first).
 Files not in the index fall back to mtime and are added on next /notify call.
 """
-import http.server, json, os, queue, threading, urllib.parse
+import http.server, json, os, queue, sys, threading, urllib.parse
 from pathlib import Path
 
 PORT = 7477
-ROOT = Path(__file__).parent
+if getattr(sys, 'frozen', False):
+    _base = Path.home() / 'ClaudeGallery'
+    ROOT = _base / 'artifacts'
+    GALLERY_HTML = _base / 'gallery.html'
+else:
+    ROOT = Path(__file__).parent
+    GALLERY_HTML = ROOT / 'gallery.html'
 SKIP = {'gallery.html', 'server.py', 'artifacts.json'}
 INDEX_FILE = ROOT / 'artifacts.json'
 
@@ -88,7 +94,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(parsed.query)
 
         if path in ('/', '/gallery.html'):
-            self.serve_file(ROOT / 'gallery.html', 'text/html')
+            self.serve_file(GALLERY_HTML, 'text/html')
 
         elif path == '/notify':
             fname = qs.get('file', [None])[0]
@@ -197,6 +203,7 @@ def guess_mime(name: str) -> str:
 
 if __name__ == '__main__':
     ROOT.mkdir(parents=True, exist_ok=True)
+    GALLERY_HTML.parent.mkdir(parents=True, exist_ok=True)
     os.chdir(ROOT)
     threading.Thread(target=heartbeat, daemon=True).start()
     print(f'Claude Gallery → http://localhost:{PORT}', flush=True)
