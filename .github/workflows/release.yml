@@ -63,6 +63,7 @@ jobs:
   test-windows:
     needs: build-windows
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -72,27 +73,32 @@ jobs:
           path: dist
 
       - name: Install silently
+        timeout-minutes: 5
         shell: powershell
         run: |
           $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
           Write-Host "Installing $($exe.FullName)"
-          Start-Process -FilePath $exe.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          Start-Process -FilePath $exe.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -Timeout 240
+          Write-Host "Install complete"
 
       - name: Start server
+        timeout-minutes: 2
         shell: powershell
         run: |
           $server = "$env:LOCALAPPDATA\ClaudeGallery\claude-gallery-server.exe"
           if (Test-Path $server) {
+            Write-Host "Found server at $server"
             Start-Process -FilePath $server -WindowStyle Hidden
           } else {
-            Write-Host "Server binary not found at $server"
-            Get-ChildItem "$env:LOCALAPPDATA\ClaudeGallery" -ErrorAction SilentlyContinue
+            Write-Host "Server binary not found. Contents of LOCALAPPDATA\ClaudeGallery:"
+            Get-ChildItem "$env:LOCALAPPDATA\ClaudeGallery" -Recurse -ErrorAction SilentlyContinue
             exit 1
           }
 
       - name: Run smoke tests
+        timeout-minutes: 5
         shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File tests\smoke.ps1
+        run: powershell -ExecutionPolicy Bypass -File tests\smoke.ps1 -StartupTimeout 30
 
       - name: Cleanup
         if: always()
@@ -104,6 +110,7 @@ jobs:
   test-mac:
     needs: build-mac
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -113,27 +120,30 @@ jobs:
           path: dist
 
       - name: Install pkg
+        timeout-minutes: 5
         run: |
           pkg=$(ls dist/*.pkg | head -1)
           echo "Installing $pkg"
           sudo installer -pkg "$pkg" -target /
 
-      - name: Copy gallery.html to user home (postinstall step for CI user)
+      - name: Set up user home directory
+        # The postinstall script runs as root — create user dirs and copy
+        # gallery.html with correct ownership for the runner user
         run: |
-          mkdir -p "$HOME/ClaudeGallery/artifacts"
-          cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
+          sudo mkdir -p "$HOME/ClaudeGallery/artifacts"
+          sudo cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
+          sudo chown -R "$USER" "$HOME/ClaudeGallery"
 
       - name: Load launchd agent
-        run: |
-          launchctl load -w ~/Library/LaunchAgents/com.claude-gallery.server.plist || true
+        run: launchctl load -w ~/Library/LaunchAgents/com.claude-gallery.server.plist || true
 
       - name: Run smoke tests
+        timeout-minutes: 5
         run: bash tests/smoke.sh
 
       - name: Cleanup
         if: always()
-        run: |
-          launchctl unload -w ~/Library/LaunchAgents/com.claude-gallery.server.plist 2>/dev/null || true
+        run: launchctl unload -w ~/Library/LaunchAgents/com.claude-gallery.server.plist 2>/dev/null || true
 
 
   # ── Publish release (only if both tests pass) ───────────────────────

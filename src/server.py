@@ -1,27 +1,82 @@
 #!/usr/bin/env python3
 """
-Claude Gallery Server
-Serves the artifact gallery on port 7477.
-Push model via SSE — zero polling, near-zero resource usage when idle.
+Claude Gallery Server — push model via SSE
+Port 7477. Zero polling — browser only updates when /notify is called.
+
+Artifact ordering is tracked in artifacts.json (insertion order, newest first).
+Files not in the index fall back to mtime and are added on next /notify call.
 """
-import http.server
-import json
-import os
-import queue
-import sys
-import threading
-import urllib.parse
+import http.server, json, os, queue, threading, urllib.parse
 from pathlib import Path
 
 PORT = 7477
-SKIP = {'gallery.html', 'server.py', 'claude-gallery-server', 'claude-gallery-server.exe'}
-
-# Artifacts folder: ~/ClaudeGallery/artifacts
-ARTIFACTS_DIR = Path.home() / 'ClaudeGallery' / 'artifacts'
-GALLERY_HTML  = Path.home() / 'ClaudeGallery' / 'gallery.html'
+ROOT = Path(__file__).parent
+SKIP = {'gallery.html', 'server.py', 'artifacts.json'}
+INDEX_FILE = ROOT / 'artifacts.json'
 
 _clients: list[queue.Queue] = []
 _clients_lock = threading.Lock()
+_index_lock = threading.Lock()
+
+
+# ── Insertion-order index ──────────────────────────────────────────────
+# artifacts.json stores a list of filenames in insertion order (oldest first).
+# The /list endpoint reverses it so newest appears at the top of the gallery.
+
+def load_index() -> list[str]:
+    """Return list of known filenames, oldest-first."""
+    try:
+        data = json.loads(INDEX_FILE.read_text())
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+def save_index(order: list[str]) -> None:
+    INDEX_FILE.write_text(json.dumps(order, indent=2))
+
+def register_file(fname: str) -> None:
+    """Add fname to the index if not already present."""
+    with _index_lock:
+        order = load_index()
+        if fname not in order:
+            order.append(fname)
+            save_index(order)
+
+def ordered_files() -> list[dict]:
+    """
+    Return file list newest-first using the index for ordering.
+    Files on disk but not in the index are appended by mtime (handles
+    files added outside of /notify, e.g. manual copies).
+    """
+    with _index_lock:
+        order = load_index()
+
+    on_disk = {
+        f.name: int(f.stat().st_mtime * 1000)
+        for f in ROOT.iterdir()
+        if f.is_file() and f.name not in SKIP
+    }
+
+    # Files known to the index, still present on disk
+    indexed = [
+        {'name': n, 'mtime': on_disk[n]}
+        for n in order if n in on_disk
+    ]
+
+    # Files on disk but not yet indexed — sort by mtime ascending so they
+    # slot in before the indexed ones when reversed
+    unindexed_names = set(on_disk) - {f['name'] for f in indexed}
+    unindexed = sorted(
+        [{'name': n, 'mtime': on_disk[n]} for n in unindexed_names],
+        key=lambda f: f['mtime']
+    )
+
+    # Combine: unindexed (oldest) + indexed (in arrival order), then reverse
+    combined = unindexed + indexed
+    combined.reverse()   # newest first
+    return combined
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -33,11 +88,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(parsed.query)
 
         if path in ('/', '/gallery.html'):
-            self.serve_file(GALLERY_HTML, 'text/html')
+            self.serve_file(ROOT / 'gallery.html', 'text/html')
 
         elif path == '/notify':
             fname = qs.get('file', [None])[0]
             if fname:
+                register_file(fname)
                 with _clients_lock:
                     for q in _clients:
                         q.put(fname)
@@ -69,10 +125,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         _clients.remove(q)
 
         elif path == '/list':
-            files = []
-            for f in sorted(ARTIFACTS_DIR.iterdir(), key=lambda x: -x.stat().st_mtime):
-                if f.is_file() and f.name not in SKIP:
-                    files.append({'name': f.name, 'mtime': int(f.stat().st_mtime * 1000)})
+            files = ordered_files()
             body = json.dumps({'files': files}).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -83,17 +136,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif path.startswith('/files/'):
             name = path[7:]
-            fpath = ARTIFACTS_DIR / name
+            fpath = ROOT / name
             try:
-                if not fpath.resolve().is_relative_to(ARTIFACTS_DIR.resolve()):
-                    self.send_error(403)
-                    return
+                if not fpath.resolve().is_relative_to(ROOT.resolve()):
+                    self.send_error(403); return
             except ValueError:
-                self.send_error(403)
-                return
+                self.send_error(403); return
             if not fpath.is_file():
-                self.send_error(404)
-                return
+                self.send_error(404); return
             self.serve_file(fpath, guess_mime(name))
 
         else:
@@ -146,13 +196,14 @@ def guess_mime(name: str) -> str:
 
 
 if __name__ == '__main__':
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-    os.chdir(ARTIFACTS_DIR)
+    ROOT.mkdir(parents=True, exist_ok=True)
+    os.chdir(ROOT)
     threading.Thread(target=heartbeat, daemon=True).start()
     print(f'Claude Gallery → http://localhost:{PORT}', flush=True)
     try:
         with http.server.ThreadingHTTPServer(('127.0.0.1', PORT), Handler) as srv:
             srv.serve_forever()
     except OSError as e:
+        import sys
         print(f'Failed to start: {e}', file=sys.stderr)
         sys.exit(1)
