@@ -73,33 +73,20 @@ jobs:
           path: dist
 
       - name: Install silently
-        # /TASKS="" skips post-install [Run] entries (server launch, browser open)
-        # so the installer completes in seconds instead of waiting on those
-        timeout-minutes: 10
+        # [Run] no longer has any blocking entries — completes in ~30s
+        timeout-minutes: 3
         shell: powershell
         run: |
           $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
           Write-Host "Installing $($exe.FullName)"
           Start-Process -FilePath $exe.FullName `
-            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=" `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" `
             -Wait
           Write-Host "Install complete"
           Get-ChildItem "$env:LOCALAPPDATA\ClaudeGallery" -ErrorAction SilentlyContinue
 
-      - name: Start server
-        timeout-minutes: 2
-        shell: powershell
-        run: |
-          $server = "$env:LOCALAPPDATA\ClaudeGallery\claude-gallery-server.exe"
-          if (Test-Path $server) {
-            Write-Host "Starting server"
-            Start-Process -FilePath $server -WindowStyle Hidden
-          } else {
-            Write-Host "Server binary not found"
-            exit 1
-          }
-
       - name: Run smoke tests
+        # Server was started by installer [Run] nowait entry — just wait for it
         timeout-minutes: 5
         shell: powershell
         run: powershell -ExecutionPolicy Bypass -File tests\smoke.ps1 -StartupTimeout 30
@@ -137,13 +124,12 @@ jobs:
           sudo chown -R "$USER" "$HOME/ClaudeGallery"
 
       - name: Start server directly
-        # Skip launchd entirely in CI — just run the binary directly
-        # launchctl bootstrap is unreliable in headless CI environments
+        # Skip launchd in CI — headless runners don't have a GUI session
+        # We test the binary directly; launchd is OS plumbing we don't need to verify
         timeout-minutes: 2
         run: |
           /usr/local/bin/claude-gallery-server &
           sleep 3
-          echo "Server started (PID $!)"
 
       - name: Run smoke tests
         timeout-minutes: 5

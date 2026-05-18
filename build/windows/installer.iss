@@ -30,6 +30,10 @@ SetupIconFile=..\..\assets\icon.ico
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[CustomMessages]
+FinishedHeadingLabel=Claude Gallery is successfully installed.
+FinishedLabel=Open Kiro or Claude Code and start generating%n— your artifacts will be shown in the gallery.
+
 [Files]
 Source: "dist\{#AppExeName}";          DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\gallery.html";      DestDir: "{userdocs}\ClaudeGallery"; Flags: ignoreversion
@@ -47,10 +51,8 @@ Name: "startupentry"; Description: "Start Claude Gallery automatically when Wind
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\inject-claude.ps1"""; Flags: runhidden waituntilterminated
 ; Register auto-start
 Filename: "reg.exe"; Parameters: "add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v ClaudeGallery /t REG_SZ /d """"""{app}\{#AppExeName}"""""" /f"; Flags: runhidden waituntilterminated; Tasks: startupentry
-; Start server now
-Filename: "{app}\{#AppExeName}"; Flags: nowait postinstall runhidden; Description: "Start Claude Gallery now"
-; Open gallery in browser
-Filename: "http://localhost:{#ServicePort}"; Flags: shellexec postinstall; Description: "Open Claude Gallery in browser"
+; Start server silently — fire and forget, does not block the installer
+Filename: "{app}\{#AppExeName}"; Flags: nowait runhidden
 
 [UninstallRun]
 Filename: "taskkill"; Parameters: "/F /IM {#AppExeName}"; Flags: runhidden

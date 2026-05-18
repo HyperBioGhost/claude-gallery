@@ -83,11 +83,10 @@ Supported types: .html, .htm, .svg, .png, .jpg, .gif, .webp, .md, .txt, .csv, .j
 INSTRUCTIONS
 fi
 
-# Load launchd agent for current user
-launchctl load -w ~/Library/LaunchAgents/com.claude-gallery.server.plist 2>/dev/null || true
-
-# Open gallery in browser (give server 2s to start)
-sleep 2 && open http://localhost:7477 &
+# Load launchd agent — macOS 13+ uses bootstrap, older versions use load
+PLIST="$HOME/Library/LaunchAgents/com.claude-gallery.server.plist"
+launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || \
+launchctl load -w "$PLIST" 2>/dev/null || true
 
 exit 0
 SCRIPT
