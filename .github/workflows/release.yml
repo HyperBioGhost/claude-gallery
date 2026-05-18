@@ -90,7 +90,7 @@ jobs:
             & powershell -ExecutionPolicy Bypass -File $script
             Write-Host "Done"
           } else {
-            Write-Host "inject-claude.ps1 not found — skipping"
+            Write-Host "inject-claude.ps1 not found - skipping"
           }
 
       - name: Start server
@@ -113,7 +113,7 @@ jobs:
       - name: Cleanup
         if: always()
         shell: powershell
-        run: taskkill /F /IM claude-gallery-server.exe 2>$null; exit 0
+        run: taskkill /F /IM claude-gallery-server.exe 2>&1 | Out-Null; exit 0
 
 
   # ── Smoke test macOS ────────────────────────────────────────────────
