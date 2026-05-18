@@ -1,8 +1,10 @@
 $claudeDir = Join-Path $env:USERPROFILE '.claude'
 $claudeMd  = Join-Path $claudeDir 'CLAUDE.md'
+$docsBase  = [Environment]::GetFolderPath('MyDocuments')
+$artifacts = Join-Path $docsBase 'ClaudeGallery\artifacts'
 
 New-Item -Path $claudeDir -ItemType Directory -Force | Out-Null
-New-Item -Path (Join-Path $env:USERPROFILE 'ClaudeGallery\artifacts') -ItemType Directory -Force | Out-Null
+New-Item -Path $artifacts -ItemType Directory -Force | Out-Null
 
 $instructions = @"
 
@@ -12,7 +14,7 @@ $instructions = @"
 
 A local artifact viewer is running at http://localhost:7477. When you generate any viewable output - HTML, SVG, images, charts, code, data files, or anything else worth seeing - do the following automatically, without being asked:
 
-1. Save the file to ~/ClaudeGallery/artifacts/<filename> (create the folder if it doesn't exist)
+1. Save the file to ~/Documents/ClaudeGallery/artifacts/<filename> (create the folder if it doesn't exist)
 2. Immediately after saving, run: curl.exe -s "http://localhost:7477/notify?file=<filename>"
 3. Tell the user: "Sent to Claude Gallery."
 
