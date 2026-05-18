@@ -5,7 +5,7 @@
 
 param([int]$Port = 7477, [int]$StartupTimeout = 20)
 
-$base    = "http://localhost:$Port"
+$base    = "http://127.0.0.1:$Port"
 $passed  = 0
 $failed  = 0
 $results = @()
