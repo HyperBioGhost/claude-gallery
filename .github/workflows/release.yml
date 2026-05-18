@@ -78,7 +78,7 @@ jobs:
         run: |
           $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
           Write-Host "Installing $($exe.FullName)"
-          Start-Process -FilePath $exe.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -Timeout 240
+          Start-Process -FilePath $exe.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
           Write-Host "Install complete"
 
       - name: Start server
@@ -135,7 +135,13 @@ jobs:
           sudo chown -R "$USER" "$HOME/ClaudeGallery"
 
       - name: Load launchd agent
-        run: launchctl load -w ~/Library/LaunchAgents/com.claude-gallery.server.plist || true
+        run: |
+          # macOS 13+ requires launchctl bootstrap instead of the deprecated load
+          PLIST="$HOME/Library/LaunchAgents/com.claude-gallery.server.plist"
+          launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || \
+          launchctl load -w "$PLIST" 2>/dev/null || true
+          # Give server a moment to start
+          sleep 3
 
       - name: Run smoke tests
         timeout-minutes: 5
@@ -143,7 +149,10 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: launchctl unload -w ~/Library/LaunchAgents/com.claude-gallery.server.plist 2>/dev/null || true
+        run: |
+          PLIST="$HOME/Library/LaunchAgents/com.claude-gallery.server.plist"
+          launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || \
+          launchctl unload -w "$PLIST" 2>/dev/null || true
 
 
   # ── Publish release (only if both tests pass) ───────────────────────
