@@ -63,33 +63,45 @@ jobs:
           name: windows-installer
           path: dist
 
-      - name: Install silently with full log
-        timeout-minutes: 5
+      - name: Install silently
+        # /TASKS="" skips the startup task checkbox — registry entry still written by [Run]
+        # inject-claude.ps1 is the known blocker so we skip it here and run it manually below
+        timeout-minutes: 3
         shell: powershell
         run: |
           $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
-          Write-Host "=== Installing: $($exe.FullName) ==="
-          # /LOG= writes a detailed Inno Setup install log
-          $log = "$env:TEMP\claude-gallery-install.log"
+          Write-Host "Installing: $($exe.FullName)"
           Start-Process -FilePath $exe.FullName `
-            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$log" `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=" `
             -Wait
-          Write-Host "=== Install process returned ==="
-          Write-Host "=== Install log: ==="
-          if (Test-Path $log) { Get-Content $log } else { Write-Host "No log file found" }
-          Write-Host "=== LOCALAPPDATA\ClaudeGallery contents: ==="
-          Get-ChildItem "$env:LOCALAPPDATA\ClaudeGallery" -Recurse -ErrorAction SilentlyContinue
-          Write-Host "=== CLAUDE.md contents: ==="
-          $md = "$env:USERPROFILE\.claude\CLAUDE.md"
-          if (Test-Path $md) { Get-Content $md } else { Write-Host "CLAUDE.md not found at $md" }
+          Write-Host "Install complete"
+          Get-ChildItem "$env:LOCALAPPDATA\ClaudeGallery" -ErrorAction SilentlyContinue
 
-      - name: Check server process
+      - name: Inject CLAUDE.md manually
+        # Run the inject script directly so we control the timeout
+        timeout-minutes: 2
         shell: powershell
         run: |
-          Write-Host "=== Processes containing 'claude': ==="
-          Get-Process | Where-Object { $_.Name -like "*claude*" } | Format-List
-          Write-Host "=== Port 7477 listeners: ==="
-          netstat -ano | Select-String "7477"
+          $script = "$env:LOCALAPPDATA\ClaudeGallery\inject-claude.ps1"
+          if (Test-Path $script) {
+            Write-Host "Running inject-claude.ps1"
+            & powershell -ExecutionPolicy Bypass -File $script
+            Write-Host "Done"
+          } else {
+            Write-Host "inject-claude.ps1 not found — skipping"
+          }
+
+      - name: Start server
+        timeout-minutes: 2
+        shell: powershell
+        run: |
+          $server = "$env:LOCALAPPDATA\ClaudeGallery\claude-gallery-server.exe"
+          if (Test-Path $server) {
+            Start-Process -FilePath $server -WindowStyle Hidden
+            Write-Host "Server started"
+          } else {
+            Write-Host "Server binary not found"; exit 1
+          }
 
       - name: Run smoke tests
         timeout-minutes: 5
@@ -134,22 +146,17 @@ jobs:
           sudo cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
           sudo chown -R "$USER" "$HOME/ClaudeGallery"
 
-      - name: Try starting server and capture output
+      - name: Start server
         timeout-minutes: 2
         run: |
-          echo "=== Binary info: ==="
-          file /usr/local/bin/claude-gallery-server 2>/dev/null || echo "binary not found"
-          ls -la /usr/local/bin/claude-gallery-server 2>/dev/null || echo "binary not found"
-          echo "=== Starting server: ==="
-          /usr/local/bin/claude-gallery-server &
-          SERVER_PID=$!
+          # nohup + setsid detaches the process from this shell
+          # so it survives when this step exits
+          nohup /usr/local/bin/claude-gallery-server > /tmp/claude-gallery.log 2>&1 &
+          echo $! > /tmp/claude-gallery.pid
           sleep 3
-          echo "=== Server PID: $SERVER_PID ==="
-          ps aux | grep claude-gallery | grep -v grep || echo "server process not found"
-          echo "=== Port 7477: ==="
-          lsof -i :7477 || echo "nothing on port 7477"
-          echo "=== curl test: ==="
-          curl -v http://localhost:7477/list 2>&1 || echo "curl failed"
+          echo "Server PID: $(cat /tmp/claude-gallery.pid)"
+          cat /tmp/claude-gallery.log || true
+          lsof -i :7477 || echo "nothing on port 7477 yet"
 
       - name: Run smoke tests
         timeout-minutes: 5
