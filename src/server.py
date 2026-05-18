@@ -206,18 +206,18 @@ def guess_mime(name: str) -> str:
 
 
 if __name__ == '__main__':
-    if sys.platform == 'win32':
+    if sys.platform == 'win32' and sys.stdout is not None:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if sys.platform == 'win32' and sys.stderr is not None:
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')
     ROOT.mkdir(parents=True, exist_ok=True)
     GALLERY_HTML.parent.mkdir(parents=True, exist_ok=True)
     os.chdir(ROOT)
     threading.Thread(target=heartbeat, daemon=True).start()
-    print(f'Claude Gallery -> http://localhost:{PORT}', flush=True)
     try:
         with http.server.ThreadingHTTPServer(('127.0.0.1', PORT), Handler) as srv:
             srv.serve_forever()
     except OSError as e:
-        import sys
-        print(f'Failed to start: {e}', file=sys.stderr)
+        if sys.stderr is not None:
+            print(f'Failed to start: {e}', file=sys.stderr)
         sys.exit(1)
