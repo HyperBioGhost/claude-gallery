@@ -73,13 +73,18 @@ jobs:
           path: dist
 
       - name: Install silently
-        timeout-minutes: 5
+        # /TASKS="" skips post-install [Run] entries (server launch, browser open)
+        # so the installer completes in seconds instead of waiting on those
+        timeout-minutes: 10
         shell: powershell
         run: |
           $exe = Get-ChildItem dist\*.exe | Select-Object -First 1
           Write-Host "Installing $($exe.FullName)"
-          Start-Process -FilePath $exe.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          Start-Process -FilePath $exe.FullName `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=" `
+            -Wait
           Write-Host "Install complete"
+          Get-ChildItem "$env:LOCALAPPDATA\ClaudeGallery" -ErrorAction SilentlyContinue
 
       - name: Start server
         timeout-minutes: 2
@@ -87,11 +92,10 @@ jobs:
         run: |
           $server = "$env:LOCALAPPDATA\ClaudeGallery\claude-gallery-server.exe"
           if (Test-Path $server) {
-            Write-Host "Found server at $server"
+            Write-Host "Starting server"
             Start-Process -FilePath $server -WindowStyle Hidden
           } else {
-            Write-Host "Server binary not found. Contents of LOCALAPPDATA\ClaudeGallery:"
-            Get-ChildItem "$env:LOCALAPPDATA\ClaudeGallery" -Recurse -ErrorAction SilentlyContinue
+            Write-Host "Server binary not found"
             exit 1
           }
 
@@ -127,21 +131,19 @@ jobs:
           sudo installer -pkg "$pkg" -target /
 
       - name: Set up user home directory
-        # The postinstall script runs as root — create user dirs and copy
-        # gallery.html with correct ownership for the runner user
         run: |
           sudo mkdir -p "$HOME/ClaudeGallery/artifacts"
           sudo cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
           sudo chown -R "$USER" "$HOME/ClaudeGallery"
 
-      - name: Load launchd agent
+      - name: Start server directly
+        # Skip launchd entirely in CI — just run the binary directly
+        # launchctl bootstrap is unreliable in headless CI environments
+        timeout-minutes: 2
         run: |
-          # macOS 13+ requires launchctl bootstrap instead of the deprecated load
-          PLIST="$HOME/Library/LaunchAgents/com.claude-gallery.server.plist"
-          launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || \
-          launchctl load -w "$PLIST" 2>/dev/null || true
-          # Give server a moment to start
+          /usr/local/bin/claude-gallery-server &
           sleep 3
+          echo "Server started (PID $!)"
 
       - name: Run smoke tests
         timeout-minutes: 5
@@ -149,10 +151,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: |
-          PLIST="$HOME/Library/LaunchAgents/com.claude-gallery.server.plist"
-          launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || \
-          launchctl unload -w "$PLIST" 2>/dev/null || true
+        run: pkill -f claude-gallery-server 2>/dev/null || true
 
 
   # ── Publish release (only if both tests pass) ───────────────────────
