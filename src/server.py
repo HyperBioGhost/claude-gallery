@@ -11,7 +11,11 @@ from pathlib import Path
 
 PORT = 7477
 if getattr(sys, 'frozen', False):
-    _base = Path.home() / 'ClaudeGallery'
+    if sys.platform == 'win32':
+        _docs = Path(os.environ.get('USERPROFILE', Path.home())) / 'Documents'
+        _base = _docs / 'ClaudeGallery'
+    else:
+        _base = Path.home() / 'ClaudeGallery'
     ROOT = _base / 'artifacts'
     GALLERY_HTML = _base / 'gallery.html'
 else:

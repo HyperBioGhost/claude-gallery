@@ -142,8 +142,9 @@ jobs:
 
       - name: Set up user home directory
         run: |
-          mkdir -p "$HOME/ClaudeGallery/artifacts"
-          cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
+          sudo mkdir -p "$HOME/ClaudeGallery/artifacts"
+          sudo cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
+          sudo chown -R "$USER" "$HOME/ClaudeGallery"
           mkdir -p "$HOME/.claude"
           CLAUDE_MD="$HOME/.claude/CLAUDE.md"
           if ! grep -q "claude-gallery-start" "$CLAUDE_MD" 2>/dev/null; then

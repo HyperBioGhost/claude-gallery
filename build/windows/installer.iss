@@ -36,12 +36,12 @@ FinishedLabel=Open Kiro or Claude Code and start generating%n— your artifacts 
 
 [Files]
 Source: "dist\{#AppExeName}";          DestDir: "{app}";                  Flags: ignoreversion
-Source: "..\..\src\gallery.html";      DestDir: "{%USERPROFILE%}\ClaudeGallery"; Flags: ignoreversion
+Source: "..\..\src\gallery.html";      DestDir: "{userdocs}\ClaudeGallery"; Flags: ignoreversion
 Source: "..\..\src\inject-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\remove-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 
 [Dirs]
-Name: "{%USERPROFILE%}\ClaudeGallery\artifacts"
+Name: "{userdocs}\ClaudeGallery\artifacts"
 
 [Tasks]
 Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts"; GroupDescription: "Startup:"
