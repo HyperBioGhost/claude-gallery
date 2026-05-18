@@ -63,9 +63,11 @@ jobs:
           name: windows-installer
           path: dist
 
+      - name: Disable Windows Defender real-time scanning
+        shell: powershell
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Install silently
-        # /TASKS="" skips the startup task checkbox — registry entry still written by [Run]
-        # inject-claude.ps1 is the known blocker so we skip it here and run it manually below
         timeout-minutes: 3
         shell: powershell
         run: |

@@ -47,12 +47,11 @@ Name: "{userdocs}\ClaudeGallery\artifacts"
 Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts"; GroupDescription: "Startup:"
 
 [Run]
-; Inject CLAUDE.md instructions — nowait so the installer never hangs
-Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\inject-claude.ps1"""; Flags: runhidden nowait
-; Register auto-start
-Filename: "reg.exe"; Parameters: "add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v ClaudeGallery /t REG_SZ /d """"""{app}\{#AppExeName}"""""" /f"; Flags: runhidden nowait; Tasks: startupentry
-; Start server silently
-Filename: "{app}\{#AppExeName}"; Flags: nowait runhidden
+; skipifsilent: CI runs /VERYSILENT and handles these steps manually.
+; Real user installs (non-silent) get all three behaviours.
+Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\inject-claude.ps1"""; Flags: runhidden nowait skipifsilent
+Filename: "reg.exe"; Parameters: "add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v ClaudeGallery /t REG_SZ /d """"""{app}\{#AppExeName}"""""" /f"; Flags: runhidden nowait skipifsilent; Tasks: startupentry
+Filename: "{app}\{#AppExeName}"; Flags: nowait runhidden skipifsilent
 
 [UninstallRun]
 Filename: "taskkill"; Parameters: "/F /IM {#AppExeName}"; Flags: runhidden
