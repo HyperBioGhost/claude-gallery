@@ -71,14 +71,26 @@ if ! grep -q "$MARKER" "$CLAUDE_MD" 2>/dev/null; then
 <!-- claude-gallery-start -->
 # Claude Gallery
 
-A local artifact viewer is running at http://localhost:7477. When you generate any viewable output — HTML, SVG, images, charts, code, data files, or anything else worth seeing — do the following automatically, without being asked:
+A local artifact viewer is running at http://localhost:7477.
+
+## Starting the gallery (if not running)
+If `curl -s http://localhost:7477/` fails (connection refused), start it:
+`/usr/local/bin/claude-gallery-server &`
+The server runs silently in the background. Do NOT look for a .py file or npm script.
+
+## Sending artifacts to the gallery
+When you generate any viewable output - HTML, SVG, images, charts, code, data files, or anything else worth seeing - do the following automatically, without being asked:
 
 1. Save the file to `~/ClaudeGallery/artifacts/<filename>` (create the folder if it doesn't exist)
 2. Immediately after saving, run: `curl -s "http://localhost:7477/notify?file=<filename>"`
 3. Tell the user: "Sent to Claude Gallery."
 
-Do NOT open a browser tab. Do NOT ask permission. Do NOT skip this for "simple" outputs.
-Supported types: .html, .htm, .svg, .png, .jpg, .gif, .webp, .md, .txt, .csv, .json, .js, .ts, .py, .css
+Gallery types: .html, .htm, .svg, .png, .jpg, .gif, .webp, .csv, .json, .py, .js, .ts, .css, .txt, .md
+
+## Non-gallery files
+If the output is a binary, archive, or temp file (.zip, .tar, .gz, .exe, etc.) - do NOT put it in the artifacts folder. Ask the user where to save it.
+
+Do NOT open a browser tab. Do NOT assume the artifacts folder is a general-purpose output folder.
 <!-- claude-gallery-end -->
 INSTRUCTIONS
 fi
