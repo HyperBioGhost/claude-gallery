@@ -43,7 +43,7 @@ echo ""
 # ── 2. GET / returns 200 and contains expected content ────────────────
 body=$(curl -sf --max-time 5 "$BASE" 2>/dev/null)
 code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BASE")
-if [ "$code" = "200" ] && echo "$body" | grep -q "Claude Gallery"; then
+if [ "$code" = "200" ] && echo "$body" | grep -q "Artifact Gallery"; then
     pass "GET / returns 200 with gallery HTML"
 else
     fail "GET / returns 200 with gallery HTML" "status=$code"
