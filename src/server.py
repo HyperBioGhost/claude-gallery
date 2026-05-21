@@ -92,6 +92,26 @@ def ordered_files() -> list[dict]:
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
 
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = urllib.parse.unquote(parsed.path)
+
+        if path == '/save':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length))
+                fname = body.get('file', '')
+                content = body.get('content', '')
+                fpath = (ROOT / fname).resolve()
+                if not fpath.is_relative_to(ROOT.resolve()) or fname in SKIP:
+                    self.send_error(403); return
+                fpath.write_text(content, encoding='utf-8')
+                self._empty_ok()
+            except Exception as e:
+                self.send_error(500, str(e))
+        else:
+            self.send_error(404)
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = urllib.parse.unquote(parsed.path)
