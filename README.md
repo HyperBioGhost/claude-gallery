@@ -8,7 +8,16 @@ A tiny local app that gives Claude Code in Kiro a live artifact viewer — so wh
 Download `ClaudeGallery-Setup.exe` from [Releases](https://github.com/HyperBioGhost/claude-gallery/releases/latest) and run it. Next → Next → Finish.
 
 ### Mac
-Download `ClaudeGallery.pkg` from [Releases](https://github.com/HyperBioGhost/claude-gallery/releases/latest) and open it. Continue → Install.
+Download `ClaudeGallery.pkg` from [Releases](https://github.com/HyperBioGhost/claude-gallery/releases/latest).
+
+macOS will block the installer because it's not signed by Apple. To bypass:
+
+1. Open **Terminal**
+2. Run:
+   ```
+   sudo xattr -r -d com.apple.quarantine ~/Downloads/ClaudeGallery-1.0.0.pkg
+   ```
+3. Now double-click the `.pkg` to install normally. Continue → Install.
 
 ## That's it
 
