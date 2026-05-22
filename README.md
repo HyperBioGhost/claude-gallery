@@ -12,10 +12,11 @@ Download `ClaudeGallery.pkg` from [Releases](https://github.com/HyperBioGhost/cl
 
 macOS will block the installer because it's not signed by Apple. To bypass:
 
-1. Open **Terminal**
-2. Type `sudo xattr -r -d com.apple.quarantine ` (with a space at the end), then drag and drop the `.pkg` file into the Terminal window — it fills in the path for you
-3. Press Enter
-4. Now double-click the `.pkg` to install normally. Continue → Install.
+**Option A** — Right-click (or Control + click) the `.pkg` file and choose "Open". The dialog will now have an "Open" button. Click it.
+
+**Option B** — If Option A doesn't show an install option, go to **System Settings → Privacy & Security**, scroll down — you'll see "ClaudeGallery was blocked" with an "Open Anyway" button.
+
+**Option C** (Terminal) — Type `sudo xattr -r -d com.apple.quarantine `, drag the `.pkg` into Terminal, press Enter. Then double-click to install.
 
 ## That's it
 
