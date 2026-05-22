@@ -47,7 +47,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mac-installer
-          path: build/mac/dist/ClaudeGallery-*.pkg
+          path: build/mac/dist/ClaudeGallery*.pkg
 
 
   # ── Smoke test Windows ──────────────────────────────────────────────
@@ -198,5 +198,5 @@ jobs:
         with:
           files: |
             windows-installer/ClaudeGallery-Setup.exe
-            mac-installer/ClaudeGallery-*.pkg
+            mac-installer/ClaudeGallery*.pkg
           generate_release_notes: true

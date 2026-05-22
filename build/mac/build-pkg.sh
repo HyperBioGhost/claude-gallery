@@ -125,6 +125,6 @@ pkgbuild \
   --version "$VERSION" \
   --scripts "$OUT_DIR/scripts" \
   --install-location "/" \
-  "$OUT_DIR/$APP_NAME-$VERSION.pkg"
+  "$OUT_DIR/$APP_NAME.pkg"
 
-echo "✓ Done: $OUT_DIR/$APP_NAME-$VERSION.pkg"
+echo "✓ Done: $OUT_DIR/$APP_NAME.pkg"
