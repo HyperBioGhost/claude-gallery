@@ -636,14 +636,12 @@
     // ── File list ──────────────────────────────────────────────────────
 
     async function loadList() {
-      try {
-        const res = await fetch('/list');
-        const data = await res.json();
-        files = data.files || [];
-        renderList();
-        document.getElementById('file-count').textContent = files.length + ' file' + (files.length !== 1 ? 's' : '');
-        if (files.length > 0 && !activeFile) selectFile(files[0]);
-      } catch(e) {}
+      const res = await fetch('/list');
+      const data = await res.json();
+      files = data.files || [];
+      renderList();
+      document.getElementById('file-count').textContent = files.length + ' file' + (files.length !== 1 ? 's' : '');
+      if (files.length > 0 && !activeFile) selectFile(files[0]);
     }
 
     let selectMode = false;
@@ -831,13 +829,32 @@
       };
       es.onerror = () => {
         dot.className = '';
-        connStatus.textContent = 'Reconnecting...';
+        connStatus.textContent = 'Server disconnected';
         es.close();
-        setTimeout(connect, 3000);
+        setTimeout(() => {
+          fetch('/list').then(r => { if (r.ok) connect(); else showServerDown(); })
+                       .catch(() => showServerDown());
+        }, 3000);
       };
     }
 
-    loadList();
+    function showServerDown() {
+      dot.className = '';
+      connStatus.textContent = 'Server is down';
+      document.getElementById('preview-area').innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:40px;text-align:center">
+          <div style="font-size:2.5rem;opacity:0.3">&#9888;</div>
+          <div style="color:#ff6b6b;font-size:1rem;font-weight:600">Gallery server is not running</div>
+          <div style="color:#888;font-size:0.8rem;line-height:1.8;max-width:400px">
+            To restart, either:<br>
+            &#8226; Double-click <strong>Start Gallery</strong> on your Desktop<br>
+            &#8226; Or ask Claude Code: <code style="background:#1e1e2a;padding:2px 6px;border-radius:3px;color:#00ffcc">start the gallery</code>
+          </div>
+          <button onclick="location.reload()" style="margin-top:12px;background:#1e1e2a;border:1px solid #2a2a3a;color:#aaa;padding:8px 20px;border-radius:4px;cursor:pointer;font-size:0.75rem">Retry</button>
+        </div>`;
+    }
+
+    loadList().catch(() => showServerDown());
     connect();
   </script>
 </body>
