@@ -43,6 +43,10 @@ Source: "..\..\src\remove-claude.ps1"; DestDir: "{app}";                  Flags:
 [Dirs]
 Name: "{userdocs}\ClaudeGallery\artifacts"
 
+[Icons]
+Name: "{userdesktop}\Claude Gallery"; Filename: "{app}\{#AppExeName}"; Comment: "Start Claude Gallery server and open http://localhost:7477"
+Name: "{userstartmenu}\Claude Gallery"; Filename: "{app}\{#AppExeName}"; Comment: "Start Claude Gallery server"
+
 [Tasks]
 Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts"; GroupDescription: "Startup:"
 

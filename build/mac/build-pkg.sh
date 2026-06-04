@@ -28,6 +28,15 @@ mkdir -p "$STAGE/Library/LaunchAgents"
 # Server binary
 cp "$OUT_DIR/bin/claude-gallery-server" "$STAGE$INSTALL_DIR/"
 
+# Open Gallery script — users can run this or add to Dock
+cat > "$STAGE$INSTALL_DIR/open-claude-gallery" <<'LAUNCHER'
+#!/bin/bash
+/usr/local/bin/claude-gallery-server &>/dev/null &
+sleep 1
+open "http://127.0.0.1:7477"
+LAUNCHER
+chmod +x "$STAGE$INSTALL_DIR/open-claude-gallery"
+
 # Gallery HTML — installed to a fixed system path; postinstall copies to user home
 mkdir -p "$STAGE/Library/ClaudeGallery"
 cp src/gallery.html "$STAGE/Library/ClaudeGallery/"
