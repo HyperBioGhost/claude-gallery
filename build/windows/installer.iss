@@ -39,6 +39,8 @@ Source: "dist\{#AppExeName}";          DestDir: "{app}";                  Flags:
 Source: "..\..\src\gallery.html";      DestDir: "{userdocs}\ClaudeGallery"; Flags: ignoreversion
 Source: "..\..\src\inject-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\remove-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
+Source: "..\..\src\register-task.ps1"; DestDir: "{app}";                  Flags: ignoreversion
+Source: "..\..\src\unregister-task.ps1"; DestDir: "{app}";                Flags: ignoreversion
 
 [Dirs]
 Name: "{userdocs}\ClaudeGallery\artifacts"
@@ -48,16 +50,16 @@ Name: "{userdesktop}\Claude Gallery"; Filename: "{app}\{#AppExeName}"; Comment: 
 Name: "{userstartmenu}\Claude Gallery"; Filename: "{app}\{#AppExeName}"; Comment: "Start Claude Gallery server"
 
 [Tasks]
-Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts"; GroupDescription: "Startup:"
+Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts (restarts if killed)"; GroupDescription: "Startup:"; Flags: checked
 
 [Run]
 ; skipifsilent: CI runs /VERYSILENT and handles these steps manually.
 ; Real user installs (non-silent) get all three behaviours.
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\inject-claude.ps1"""; Flags: runhidden nowait skipifsilent
-Filename: "reg.exe"; Parameters: "add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v ClaudeGallery /t REG_SZ /d """"""{app}\{#AppExeName}"""""" /f"; Flags: runhidden nowait skipifsilent; Tasks: startupentry
+Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\register-task.ps1"""; Flags: runhidden nowait skipifsilent; Tasks: startupentry
 Filename: "{app}\{#AppExeName}"; Flags: nowait runhidden skipifsilent
 
 [UninstallRun]
 Filename: "taskkill"; Parameters: "/F /IM {#AppExeName}"; Flags: runhidden
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\remove-claude.ps1"""; Flags: runhidden waituntilterminated
-Filename: "reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v ClaudeGallery /f"; Flags: runhidden
+Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\unregister-task.ps1"""; Flags: runhidden waituntilterminated
