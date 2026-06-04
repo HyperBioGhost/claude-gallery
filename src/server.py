@@ -36,7 +36,7 @@ _index_lock = threading.Lock()
 def load_index() -> list[str]:
     """Return list of known filenames, oldest-first."""
     try:
-        data = json.loads(INDEX_FILE.read_text())
+        data = json.loads(INDEX_FILE.read_text(encoding='utf-8'))
         if isinstance(data, list):
             return data
     except Exception:
@@ -44,7 +44,7 @@ def load_index() -> list[str]:
     return []
 
 def save_index(order: list[str]) -> None:
-    INDEX_FILE.write_text(json.dumps(order, indent=2))
+    INDEX_FILE.write_text(json.dumps(order, indent=2, ensure_ascii=False), encoding='utf-8')
 
 def register_file(fname: str) -> None:
     """Add fname to the index if not already present."""
@@ -109,6 +109,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._empty_ok()
             except Exception as e:
                 self.send_error(500, str(e))
+
+        elif path == '/delete':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length))
+                names = body.get('files', [])
+                deleted = []
+                for fname in names:
+                    fpath = (ROOT / fname).resolve()
+                    if not fpath.is_relative_to(ROOT.resolve()) or fname in SKIP:
+                        continue
+                    if fpath.is_file():
+                        fpath.unlink()
+                        deleted.append(fname)
+                with _index_lock:
+                    order = load_index()
+                    order = [n for n in order if n not in deleted]
+                    save_index(order)
+                resp = json.dumps({'deleted': deleted}, ensure_ascii=False).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Content-Length', len(resp))
+                self.end_headers()
+                self.wfile.write(resp)
+            except Exception as e:
+                self.send_error(500, str(e))
+
         else:
             self.send_error(404)
 
@@ -144,7 +171,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if fname == '__ping__':
                         self.wfile.write(b': ping\n\n')
                     else:
-                        msg = f'data: {json.dumps({"file": fname})}\n\n'
+                        msg = f'data: {json.dumps({"file": fname}, ensure_ascii=False)}\n\n'
                         self.wfile.write(msg.encode())
                     self.wfile.flush()
             except Exception:
@@ -156,7 +183,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif path == '/list':
             files = ordered_files()
-            body = json.dumps({'files': files}).encode()
+            body = json.dumps({'files': files}, ensure_ascii=False).encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', len(body))
