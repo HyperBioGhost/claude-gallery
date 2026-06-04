@@ -109,6 +109,16 @@ PLIST="$HOME/Library/LaunchAgents/com.claude-gallery.server.plist"
 launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || \
 launchctl load -w "$PLIST" 2>/dev/null || true
 
+# Create Desktop shortcut (.command file)
+DESKTOP="$HOME/Desktop/Open Claude Gallery.command"
+cat > "$DESKTOP" <<'CMD'
+#!/bin/bash
+/usr/local/bin/claude-gallery-server &>/dev/null &
+sleep 1
+open "http://127.0.0.1:7477"
+CMD
+chmod +x "$DESKTOP"
+
 exit 0
 SCRIPT
 chmod +x "$OUT_DIR/scripts/postinstall"
