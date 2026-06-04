@@ -50,7 +50,7 @@ Name: "{userdesktop}\Claude Gallery"; Filename: "{app}\{#AppExeName}"; Comment: 
 Name: "{userstartmenu}\Claude Gallery"; Filename: "{app}\{#AppExeName}"; Comment: "Start Claude Gallery server"
 
 [Tasks]
-Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts"; GroupDescription: "Startup:"; Flags: checked
+Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts"; GroupDescription: "Startup:"
 
 [Run]
 ; skipifsilent: CI runs /VERYSILENT and handles these steps manually.
