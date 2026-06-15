@@ -2,6 +2,10 @@
 
 A tiny local app that gives Claude Code in Kiro a live artifact viewer — so when Claude generates HTML, SVGs, charts, code, or data files, they appear in a browser gallery instantly.
 
+## Supported Formats
+
+![Supported formats](assets/features.svg)
+
 ## Install
 
 ### Windows

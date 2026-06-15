@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" font-family="'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f0f14"/>
+      <stop offset="100%" style="stop-color:#0a0a0f"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="620" fill="url(#bg)" rx="12"/>
+
+  <!-- Title -->
+  <text x="450" y="42" text-anchor="middle" fill="#00ffcc" font-size="14" font-weight="600" letter-spacing="4" opacity="0.9">SUPPORTED FORMATS</text>
+
+  <!-- Table header -->
+  <rect x="30" y="58" width="840" height="32" fill="#16161f" rx="4"/>
+  <text x="50" y="79" fill="#00ffcc" font-size="11" font-weight="600">FILE TYPE</text>
+  <text x="200" y="79" fill="#00ffcc" font-size="11" font-weight="600">EXTENSION</text>
+  <text x="370" y="79" fill="#00ffcc" font-size="11" font-weight="600">VIEW MODE</text>
+  <text x="720" y="79" fill="#00ffcc" font-size="11" font-weight="600">EDIT</text>
+  <text x="780" y="79" fill="#00ffcc" font-size="11" font-weight="600">LIVE PREVIEW</text>
+
+  <!-- Row 1: webpage -->
+  <rect x="30" y="94" width="840" height="36" fill="#12121a" rx="0"/>
+  <rect x="50" y="103" width="36" height="16" fill="#e34c2622" rx="3"/>
+  <text x="68" y="115" text-anchor="middle" fill="#e34c26" font-size="8" font-weight="700">HTML</text>
+  <text x="95" y="117" fill="#ccc" font-size="12">Webpage</text>
+  <text x="200" y="117" fill="#888" font-size="11">.html  .htm</text>
+  <text x="370" y="117" fill="#aaa" font-size="11">Fully rendered webpage (iframe)</text>
+  <text x="730" y="117" fill="#555" font-size="11">—</text>
+  <text x="810" y="117" fill="#555" font-size="11">—</text>
+
+  <!-- Row 2: SVG -->
+  <rect x="30" y="130" width="840" height="36" fill="#0f0f16" rx="0"/>
+  <rect x="50" y="139" width="30" height="16" fill="#ffb30022" rx="3"/>
+  <text x="65" y="151" text-anchor="middle" fill="#ffb300" font-size="8" font-weight="700">SVG</text>
+  <text x="88" y="153" fill="#ccc" font-size="12">Vector Image</text>
+  <text x="200" y="153" fill="#888" font-size="11">.svg</text>
+  <text x="370" y="153" fill="#aaa" font-size="11">Fully rendered image</text>
+  <text x="730" y="153" fill="#555" font-size="11">—</text>
+  <text x="810" y="153" fill="#555" font-size="11">—</text>
+
+  <!-- Row 3: Images -->
+  <rect x="30" y="166" width="840" height="36" fill="#12121a" rx="0"/>
+  <rect x="50" y="175" width="30" height="16" fill="#4caf5022" rx="3"/>
+  <text x="65" y="187" text-anchor="middle" fill="#4caf50" font-size="8" font-weight="700">IMG</text>
+  <text x="88" y="189" fill="#ccc" font-size="12">Images</text>
+  <text x="200" y="189" fill="#888" font-size="11">.png .jpg .gif .webp</text>
+  <text x="370" y="189" fill="#aaa" font-size="11">Centered image view</text>
+  <text x="730" y="189" fill="#555" font-size="11">—</text>
+  <text x="810" y="189" fill="#555" font-size="11">—</text>
+
+  <!-- Row 4: Markdown -->
+  <rect x="30" y="202" width="840" height="36" fill="#0f0f16" rx="0"/>
+  <rect x="50" y="211" width="28" height="16" fill="#2196f322" rx="3"/>
+  <text x="64" y="223" text-anchor="middle" fill="#2196f3" font-size="8" font-weight="700">MD</text>
+  <text x="86" y="225" fill="#ccc" font-size="12">Markdown</text>
+  <text x="200" y="225" fill="#888" font-size="11">.md</text>
+  <text x="370" y="225" fill="#aaa" font-size="11">Split: source + rendered (scroll synced)</text>
+  <circle cx="733" cy="222" r="5" fill="#00ffcc"/>
+  <circle cx="823" cy="222" r="5" fill="#00ffcc"/>
+
+  <!-- Row 5: JSON -->
+  <rect x="30" y="238" width="840" height="36" fill="#12121a" rx="0"/>
+  <rect x="50" y="247" width="36" height="16" fill="#ff572222" rx="3"/>
+  <text x="68" y="259" text-anchor="middle" fill="#ff7043" font-size="8" font-weight="700">JSON</text>
+  <text x="95" y="261" fill="#ccc" font-size="12">JSON</text>
+  <text x="200" y="261" fill="#888" font-size="11">.json</text>
+  <text x="370" y="261" fill="#aaa" font-size="11">Split: raw + formatted / highlighted</text>
+  <circle cx="733" cy="258" r="5" fill="#00ffcc"/>
+  <circle cx="823" cy="258" r="5" fill="#00ffcc"/>
+
+  <!-- Row 6: CSV -->
+  <rect x="30" y="274" width="840" height="36" fill="#0f0f16" rx="0"/>
+  <rect x="50" y="283" width="30" height="16" fill="#00968822" rx="3"/>
+  <text x="65" y="295" text-anchor="middle" fill="#26c6a0" font-size="8" font-weight="700">CSV</text>
+  <text x="88" y="297" fill="#ccc" font-size="12">Spreadsheet</text>
+  <text x="200" y="297" fill="#888" font-size="11">.csv</text>
+  <text x="370" y="297" fill="#aaa" font-size="11">Table with headers + row count</text>
+  <circle cx="733" cy="294" r="5" fill="#00ffcc"/>
+  <circle cx="823" cy="294" r="5" fill="#00ffcc"/>
+
+  <!-- Row 7: Mermaid -->
+  <rect x="30" y="310" width="840" height="36" fill="#12121a" rx="0"/>
+  <rect x="50" y="319" width="34" height="16" fill="#ff338822" rx="3"/>
+  <text x="67" y="331" text-anchor="middle" fill="#ff79a8" font-size="8" font-weight="700">MMD</text>
+  <text x="92" y="333" fill="#ccc" font-size="12">Mermaid</text>
+  <text x="200" y="333" fill="#888" font-size="11">.mermaid  .mmd</text>
+  <text x="370" y="333" fill="#aaa" font-size="11">Split: source + rendered diagram</text>
+  <circle cx="733" cy="330" r="5" fill="#00ffcc"/>
+  <circle cx="823" cy="330" r="5" fill="#00ffcc"/>
+
+  <!-- Row 8: Python -->
+  <rect x="30" y="346" width="840" height="36" fill="#0f0f16" rx="0"/>
+  <rect x="50" y="355" width="26" height="16" fill="#3572a522" rx="3"/>
+  <text x="63" y="367" text-anchor="middle" fill="#6fb3d9" font-size="8" font-weight="700">PY</text>
+  <text x="84" y="369" fill="#ccc" font-size="12">Python</text>
+  <text x="200" y="369" fill="#888" font-size="11">.py</text>
+  <text x="370" y="369" fill="#aaa" font-size="11">Syntax highlighted</text>
+  <circle cx="733" cy="366" r="5" fill="#00ffcc"/>
+  <text x="810" y="369" fill="#555" font-size="11">—</text>
+
+  <!-- Row 9: JavaScript -->
+  <rect x="30" y="382" width="840" height="36" fill="#12121a" rx="0"/>
+  <rect x="50" y="391" width="24" height="16" fill="#f7df1e22" rx="3"/>
+  <text x="62" y="403" text-anchor="middle" fill="#f7df1e" font-size="8" font-weight="700">JS</text>
+  <text x="82" y="405" fill="#ccc" font-size="12">JavaScript</text>
+  <text x="200" y="405" fill="#888" font-size="11">.js</text>
+  <text x="370" y="405" fill="#aaa" font-size="11">Syntax highlighted</text>
+  <circle cx="733" cy="402" r="5" fill="#00ffcc"/>
+  <text x="810" y="405" fill="#555" font-size="11">—</text>
+
+  <!-- Row 10: TypeScript -->
+  <rect x="30" y="418" width="840" height="36" fill="#0f0f16" rx="0"/>
+  <rect x="50" y="427" width="24" height="16" fill="#3178c622" rx="3"/>
+  <text x="62" y="439" text-anchor="middle" fill="#5aa0e8" font-size="8" font-weight="700">TS</text>
+  <text x="82" y="441" fill="#ccc" font-size="12">TypeScript</text>
+  <text x="200" y="441" fill="#888" font-size="11">.ts</text>
+  <text x="370" y="441" fill="#aaa" font-size="11">Syntax highlighted</text>
+  <circle cx="733" cy="438" r="5" fill="#00ffcc"/>
+  <text x="810" y="441" fill="#555" font-size="11">—</text>
+
+  <!-- Row 11: CSS -->
+  <rect x="30" y="454" width="840" height="36" fill="#12121a" rx="0"/>
+  <rect x="50" y="463" width="30" height="16" fill="#56439922" rx="3"/>
+  <text x="65" y="475" text-anchor="middle" fill="#9d7fe0" font-size="8" font-weight="700">CSS</text>
+  <text x="88" y="477" fill="#ccc" font-size="12">CSS</text>
+  <text x="200" y="477" fill="#888" font-size="11">.css</text>
+  <text x="370" y="477" fill="#aaa" font-size="11">Syntax highlighted</text>
+  <circle cx="733" cy="474" r="5" fill="#00ffcc"/>
+  <text x="810" y="477" fill="#555" font-size="11">—</text>
+
+  <!-- Row 12: XML -->
+  <rect x="30" y="490" width="840" height="36" fill="#0f0f16" rx="0"/>
+  <rect x="50" y="499" width="30" height="16" fill="#e34c2622" rx="3"/>
+  <text x="65" y="511" text-anchor="middle" fill="#e8864a" font-size="8" font-weight="700">XML</text>
+  <text x="88" y="513" fill="#ccc" font-size="12">XML</text>
+  <text x="200" y="513" fill="#888" font-size="11">.xml</text>
+  <text x="370" y="513" fill="#aaa" font-size="11">Syntax highlighted</text>
+  <circle cx="733" cy="510" r="5" fill="#00ffcc"/>
+  <text x="810" y="513" fill="#555" font-size="11">—</text>
+
+  <!-- Row 13: YAML -->
+  <rect x="30" y="526" width="840" height="36" fill="#12121a" rx="0"/>
+  <rect x="50" y="535" width="36" height="16" fill="#cb171e22" rx="3"/>
+  <text x="68" y="547" text-anchor="middle" fill="#f06b6b" font-size="8" font-weight="700">YAML</text>
+  <text x="95" y="549" fill="#ccc" font-size="12">YAML</text>
+  <text x="200" y="549" fill="#888" font-size="11">.yaml  .yml</text>
+  <text x="370" y="549" fill="#aaa" font-size="11">Syntax highlighted</text>
+  <circle cx="733" cy="546" r="5" fill="#00ffcc"/>
+  <text x="810" y="549" fill="#555" font-size="11">—</text>
+
+  <!-- Row 14: TXT -->
+  <rect x="30" y="562" width="840" height="36" fill="#0f0f16" rx="0"/>
+  <rect x="50" y="571" width="30" height="16" fill="#9c27b022" rx="3"/>
+  <text x="65" y="583" text-anchor="middle" fill="#ce93d8" font-size="8" font-weight="700">TXT</text>
+  <text x="88" y="585" fill="#ccc" font-size="12">Plain Text</text>
+  <text x="200" y="585" fill="#888" font-size="11">.txt</text>
+  <text x="370" y="585" fill="#aaa" font-size="11">Monospace plain text</text>
+  <circle cx="733" cy="582" r="5" fill="#00ffcc"/>
+  <text x="810" y="585" fill="#555" font-size="11">—</text>
+
+  <!-- Legend -->
+  <circle cx="50" cy="610" r="4" fill="#00ffcc"/>
+  <text x="60" y="614" fill="#666" font-size="9">Supported</text>
+  <text x="120" y="614" fill="#555" font-size="9">—  Not applicable</text>
+
+  <!-- Border glow -->
+  <rect x="0" y="0" width="900" height="620" fill="none" stroke="#00ffcc" stroke-width="0.5" rx="12" opacity="0.2"/>
+</svg>
