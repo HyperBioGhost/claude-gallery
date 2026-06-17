@@ -110,12 +110,22 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || \
 launchctl load -w "$PLIST" 2>/dev/null || true
 
 # Create Desktop shortcut (.command file)
-DESKTOP="$HOME/Desktop/Open Claude Gallery.command"
+DESKTOP="$HOME/Desktop/Gallery Server Starter.command"
 cat > "$DESKTOP" <<'CMD'
 #!/bin/bash
+if curl -s -o /dev/null http://127.0.0.1:7477/ 2>/dev/null; then
+    open "http://127.0.0.1:7477"
+    exit 0
+fi
 /usr/local/bin/claude-gallery-server &>/dev/null &
-sleep 1
-open "http://127.0.0.1:7477"
+sleep 2
+if curl -s -o /dev/null http://127.0.0.1:7477/ 2>/dev/null; then
+    open "http://127.0.0.1:7477"
+else
+    echo "Gallery server failed to start."
+    echo "Check /tmp/claude-gallery.log for details."
+    read -p "Press Enter to close..."
+fi
 CMD
 chmod +x "$DESKTOP"
 

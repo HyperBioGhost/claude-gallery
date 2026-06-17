@@ -41,13 +41,14 @@ Source: "..\..\src\inject-claude.ps1"; DestDir: "{app}";                  Flags:
 Source: "..\..\src\remove-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\register-task.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\unregister-task.ps1"; DestDir: "{app}";                Flags: ignoreversion
+Source: "..\..\src\start-gallery.bat"; DestDir: "{app}";                  Flags: ignoreversion
 
 [Dirs]
 Name: "{userdocs}\ClaudeGallery\artifacts"
 
 [Icons]
-Name: "{userdesktop}\Claude Gallery"; Filename: "{app}\{#AppExeName}"; Comment: "Start Claude Gallery server and open http://localhost:7477"
-Name: "{userstartmenu}\Claude Gallery"; Filename: "{app}\{#AppExeName}"; Comment: "Start Claude Gallery server"
+Name: "{userdesktop}\Gallery Server Starter"; Filename: "{app}\start-gallery.bat"; IconFilename: "{app}\{#AppExeName}"; Comment: "Start Claude Gallery server and open in browser"
+Name: "{userstartmenu}\Gallery Server Starter"; Filename: "{app}\start-gallery.bat"; IconFilename: "{app}\{#AppExeName}"; Comment: "Start Claude Gallery server and open in browser"
 
 [Tasks]
 Name: "startupentry"; Description: "Start Claude Gallery automatically when Windows starts"; GroupDescription: "Startup:"
