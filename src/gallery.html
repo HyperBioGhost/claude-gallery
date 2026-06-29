@@ -614,22 +614,28 @@
       const url = '/files/' + encodeURIComponent(activeFile.name);
       const res = await fetch(url);
       const blob = await res.blob();
-      const ext = activeFile.name.includes('.') ? activeFile.name.split('.').pop().toLowerCase() : '';
-      try {
-        const handle = await window.showSaveFilePicker({
-          suggestedName: activeFile.name,
-          types: ext ? [{ description: ext.toUpperCase() + ' file', accept: { [blob.type || 'application/octet-stream']: ['.' + ext] } }] : []
-        });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        const status = document.getElementById('save-status');
-        status.textContent = 'Exported.';
-        status.style.color = '#00ffcc';
-        setTimeout(() => { status.textContent = ''; status.style.color = '#555'; }, 2000);
-      } catch(e) {
-        if (e.name !== 'AbortError') alert('Save failed: ' + e.message);
+
+      if (window.showSaveFilePicker) {
+        const ext = activeFile.name.includes('.') ? activeFile.name.split('.').pop().toLowerCase() : '';
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: activeFile.name,
+            types: ext ? [{ description: ext.toUpperCase() + ' file', accept: { [blob.type || 'application/octet-stream']: ['.' + ext] } }] : []
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+        } catch(e) {
+          if (e.name !== 'AbortError') alert('Save failed: ' + e.message);
+          return;
+        }
+      } else {
+        downloadBlob(blob, activeFile.name);
       }
+      const status = document.getElementById('save-status');
+      status.textContent = 'Exported.';
+      status.style.color = '#00ffcc';
+      setTimeout(() => { status.textContent = ''; status.style.color = '#555'; }, 2000);
     }
 
     // ── Export as (file type conversion) ─────────────────────────────
