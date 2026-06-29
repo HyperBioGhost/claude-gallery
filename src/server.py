@@ -249,6 +249,11 @@ def guess_mime(name: str) -> str:
         'csv':  'text/plain; charset=utf-8',
         'ts':   'text/plain; charset=utf-8',
         'py':   'text/plain; charset=utf-8',
+        'xml':  'text/xml; charset=utf-8',
+        'yaml': 'text/plain; charset=utf-8',
+        'yml':  'text/plain; charset=utf-8',
+        'mermaid': 'text/plain; charset=utf-8',
+        'mmd':  'text/plain; charset=utf-8',
     }.get(ext, 'application/octet-stream')
 
 

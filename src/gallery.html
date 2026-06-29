@@ -117,6 +117,9 @@
     .badge-ts   { background: #3178c622; color: #5aa0e8; }
     .badge-css  { background: #56439922; color: #9d7fe0; }
     .badge-csv  { background: #00968822; color: #26c6a0; }
+    .badge-xml  { background: #e34c2622; color: #e8864a; }
+    .badge-yaml { background: #cb171e22; color: #f06b6b; }
+    .badge-mmd  { background: #ff338822; color: #ff79a8; }
     .badge-file { background: #55555522; color: #aaa; }
     .file-item .ts { display: block; font-size: 0.6rem; color: #555; margin-top: 2px; }
     .new-flash { animation: newflash 2s ease-out forwards; }
@@ -197,6 +200,51 @@
       transition: all 0.15s;
     }
     #save-btn:hover { background: #00ffcc44; }
+    #saveas-btn {
+      background: #1e1e2a;
+      border: 1px solid #2a2a3a;
+      color: #aaa;
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.72rem;
+      transition: all 0.15s;
+    }
+    #saveas-btn:hover { background: #2a2a3a; color: #fff; }
+    #export-dropdown-wrap { position: relative; display: inline-block; }
+    #export-btn {
+      background: #1e1e2a;
+      border: 1px solid #2a2a3a;
+      color: #aaa;
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.72rem;
+      transition: all 0.15s;
+    }
+    #export-btn:hover { background: #2a2a3a; color: #fff; }
+    #export-menu {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 4px;
+      background: #1e1e2a;
+      border: 1px solid #2a2a3a;
+      border-radius: 6px;
+      min-width: 200px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      z-index: 100;
+      overflow: hidden;
+    }
+    .export-item {
+      padding: 8px 14px;
+      font-size: 0.72rem;
+      color: #ccc;
+      cursor: pointer;
+      transition: background 0.1s;
+      white-space: nowrap;
+    }
+    .export-item:hover { background: #00ffcc22; color: #00ffcc; }
     #preview-area { flex: 1; overflow: hidden; position: relative; background: #0f0f14; }
     iframe { width: 100%; height: 100%; border: none; background: #fff; }
 
@@ -332,6 +380,11 @@
       <button id="edit-btn" onclick="toggleEdit()">Edit</button>
       <span id="save-status"></span>
       <button id="save-btn" onclick="saveEdit()" style="display:none">Save to disk</button>
+      <button id="saveas-btn" onclick="saveAs()">Save As</button>
+      <div id="export-dropdown-wrap" style="display:none">
+        <button id="export-btn" onclick="toggleExportMenu()">Export as &#9662;</button>
+        <div id="export-menu" style="display:none"></div>
+      </div>
       <a id="open-btn" href="#" target="_blank">Open in tab &#8599;</a>
     </div>
     <div id="editor-wrap">
@@ -362,12 +415,17 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1/dist/html2canvas.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
   <script>
     const dot = document.getElementById('conn-dot');
     const connStatus = document.getElementById('conn-status');
     let files = [], activeFile = null;
-    const EDITABLE = ['md','json','py','js','ts','css','txt','csv'];
+    const EDITABLE = ['md','json','py','js','ts','css','txt','csv','xml','yaml','yml','mermaid','mmd'];
 
     let livePreviewExt = null;
 
@@ -446,6 +504,18 @@
           table.appendChild(tr);
         });
         live.appendChild(table);
+      } else if (['mermaid','mmd'].includes(livePreviewExt)) {
+        live.className = '';
+        live.innerHTML = '';
+        live.style.cssText = 'padding:24px;display:flex;align-items:center;justify-content:center;min-height:100%;background:#1a1a24';
+        try {
+          const id = 'mmd-live-' + Date.now();
+          mermaid.render(id, text).then(({ svg }) => { live.innerHTML = svg; })
+            .catch(err => { live.style.cssText = 'padding:20px;color:#ff6b6b;font-size:0.8rem'; live.textContent = 'Mermaid error: ' + err.message; });
+        } catch(err) {
+          live.style.cssText = 'padding:20px;color:#ff6b6b;font-size:0.8rem';
+          live.textContent = 'Mermaid error: ' + err.message;
+        }
       }
     }
 
@@ -465,7 +535,7 @@
           document.getElementById('save-status').textContent = activeFile.name;
 
           // show live pane only for md and json
-          livePreviewExt = ['md','json','csv'].includes(e) ? e : null;
+          livePreviewExt = ['md','json','csv','mermaid','mmd'].includes(e) ? e : null;
           if (livePreviewExt) {
             right.classList.add('visible');
             document.getElementById('editor-left-label').textContent = 'Edit';
@@ -539,6 +609,159 @@
       }
     }
 
+    async function saveAs() {
+      if (!activeFile) return;
+      const url = '/files/' + encodeURIComponent(activeFile.name);
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const ext = activeFile.name.includes('.') ? activeFile.name.split('.').pop().toLowerCase() : '';
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: activeFile.name,
+          types: ext ? [{ description: ext.toUpperCase() + ' file', accept: { [blob.type || 'application/octet-stream']: ['.' + ext] } }] : []
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        const status = document.getElementById('save-status');
+        status.textContent = 'Exported.';
+        status.style.color = '#00ffcc';
+        setTimeout(() => { status.textContent = ''; status.style.color = '#555'; }, 2000);
+      } catch(e) {
+        if (e.name !== 'AbortError') alert('Save failed: ' + e.message);
+      }
+    }
+
+    // ── Export as (file type conversion) ─────────────────────────────
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function getExportOptions(ext) {
+      if (ext === 'md') return [
+        { label: 'HTML document (.html)', action: exportMdToHtml },
+        { label: 'PDF (via print)', action: exportMdToPdf },
+        { label: 'Word-compatible (.doc)', action: exportMdToDoc },
+      ];
+      if (['html','htm'].includes(ext)) return [
+        { label: 'PDF (via print)', action: exportHtmlToPdf },
+        { label: 'Screenshot (.png)', action: exportHtmlToPng },
+      ];
+      if (['mermaid','mmd'].includes(ext)) return [
+        { label: 'SVG image (.svg)', action: exportMermaidToSvg },
+        { label: 'PNG image (.png)', action: exportMermaidToPng },
+      ];
+      return [];
+    }
+
+    function toggleExportMenu() {
+      const menu = document.getElementById('export-menu');
+      if (menu.style.display !== 'none') { menu.style.display = 'none'; return; }
+      if (!activeFile) return;
+      const options = getExportOptions(getExt(activeFile.name));
+      if (!options.length) return;
+      menu.innerHTML = '';
+      options.forEach(opt => {
+        const item = document.createElement('div');
+        item.className = 'export-item';
+        item.textContent = opt.label;
+        item.onclick = () => { menu.style.display = 'none'; opt.action(); };
+        menu.appendChild(item);
+      });
+      menu.style.display = 'block';
+    }
+
+    document.addEventListener('click', e => {
+      const wrap = document.getElementById('export-dropdown-wrap');
+      if (wrap && !wrap.contains(e.target)) {
+        document.getElementById('export-menu').style.display = 'none';
+      }
+    });
+
+    async function exportMdToHtml() {
+      const text = await (await fetch('/files/' + encodeURIComponent(activeFile.name))).text();
+      const rendered = marked.parse(text);
+      const title = activeFile.name.replace(/\.md$/i, '');
+      const html = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<title>${title}</title>\n<style>\n  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #333; }\n  pre { background: #f5f5f5; padding: 14px; border-radius: 5px; overflow-x: auto; }\n  code { background: #f0f0f0; padding: 2px 5px; border-radius: 3px; font-size: 0.9em; }\n  pre code { background: none; padding: 0; }\n  blockquote { border-left: 3px solid #ddd; margin: 1em 0; padding: 0.5em 1em; color: #666; }\n  table { border-collapse: collapse; width: 100%; margin: 1em 0; }\n  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }\n  th { background: #f5f5f5; }\n  img { max-width: 100%; }\n</style>\n</head>\n<body>\n${rendered}\n</body>\n</html>`;
+      downloadBlob(new Blob([html], { type: 'text/html' }), title + '.html');
+    }
+
+    async function exportMdToPdf() {
+      const text = await (await fetch('/files/' + encodeURIComponent(activeFile.name))).text();
+      const rendered = marked.parse(text);
+      const w = window.open('', '_blank');
+      w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${activeFile.name}</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.7;color:#333}pre{background:#f5f5f5;padding:14px;border-radius:5px;overflow-x:auto}code{background:#f0f0f0;padding:2px 5px;border-radius:3px}pre code{background:none;padding:0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px 12px}th{background:#f5f5f5}</style></head><body>${rendered}</body></html>`);
+      w.document.close();
+      setTimeout(() => w.print(), 500);
+    }
+
+    async function exportMdToDoc() {
+      const text = await (await fetch('/files/' + encodeURIComponent(activeFile.name))).text();
+      const rendered = marked.parse(text);
+      const doc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><title>${activeFile.name}</title><!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]--><style>body{font-family:Calibri,sans-serif;line-height:1.6}table{border-collapse:collapse}th,td{border:1px solid #999;padding:6px 10px}</style></head><body>${rendered}</body></html>`;
+      downloadBlob(new Blob([doc], { type: 'application/msword' }), activeFile.name.replace(/\.md$/i, '.doc'));
+    }
+
+    function exportHtmlToPdf() {
+      const w = window.open('/files/' + encodeURIComponent(activeFile.name), '_blank');
+      setTimeout(() => w.print(), 1000);
+    }
+
+    async function exportHtmlToPng() {
+      const iframe = document.querySelector('#preview-area iframe');
+      if (!iframe) { alert('No preview found'); return; }
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        const canvas = await html2canvas(iframeDoc.body, { backgroundColor: '#ffffff', scale: 2, useCORS: true });
+        canvas.toBlob(blob => {
+          downloadBlob(blob, activeFile.name.replace(/\.(html|htm)$/i, '.png'));
+        }, 'image/png');
+      } catch(e) {
+        alert('Screenshot failed: ' + e.message + '\n\nTip: Try "Open in tab" and use your OS screenshot tool instead.');
+      }
+    }
+
+    function exportMermaidToSvg() {
+      const svgEl = document.querySelector('#preview-area .split-half:last-child svg') ||
+                    document.querySelector('#editor-live svg');
+      if (!svgEl) { alert('No rendered diagram found.'); return; }
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      downloadBlob(new Blob([svgData], { type: 'image/svg+xml' }), activeFile.name.replace(/\.(mermaid|mmd)$/i, '.svg'));
+    }
+
+    async function exportMermaidToPng() {
+      const svgEl = document.querySelector('#preview-area .split-half:last-child svg') ||
+                    document.querySelector('#editor-live svg');
+      if (!svgEl) { alert('No rendered diagram found.'); return; }
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const svgUrl = URL.createObjectURL(svgBlob);
+      const img = new Image();
+      img.onload = () => {
+        const scale = 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth * scale;
+        canvas.height = img.naturalHeight * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(scale, scale);
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(svgUrl);
+        canvas.toBlob(blob => {
+          downloadBlob(blob, activeFile.name.replace(/\.(mermaid|mmd)$/i, '.png'));
+        }, 'image/png');
+      };
+      img.onerror = () => { URL.revokeObjectURL(svgUrl); alert('Failed to rasterize SVG to PNG.'); };
+      img.src = svgUrl;
+    }
+
     function getExt(name) { return name.includes('.') ? name.split('.').pop().toLowerCase() : ''; }
 
     function badge(name) {
@@ -549,7 +772,9 @@
         md:'md', txt:'txt',
         json:'json', py:'py',
         js:'js', ts:'ts', css:'css',
-        csv:'csv'
+        csv:'csv',
+        xml:'xml', yaml:'yaml', yml:'yaml',
+        mermaid:'mmd', mmd:'mmd'
       };
       return map[e] || 'file';
     }
@@ -706,6 +931,9 @@
       document.getElementById('open-btn').href = '/files/' + encodeURIComponent(f.name);
       const editBtn = document.getElementById('edit-btn');
       editBtn.style.display = EDITABLE.includes(getExt(f.name)) ? 'inline-block' : 'none';
+      const exportWrap = document.getElementById('export-dropdown-wrap');
+      exportWrap.style.display = getExportOptions(getExt(f.name)).length > 0 ? 'inline-block' : 'none';
+      document.getElementById('export-menu').style.display = 'none';
 
       const area = document.getElementById('preview-area');
       area.innerHTML = '';
@@ -789,9 +1017,27 @@
           area.appendChild(makeSplitPane('Raw', leftEl, 'Formatted', rightEl));
         });
 
+      // ── Mermaid: source | rendered diagram ─────────────────────────
+      } else if (['mermaid','mmd'].includes(e)) {
+        fetch(url).then(r => r.text()).then(async text => {
+          const leftEl = makeCodeBlock(text, 'plaintext');
+
+          const rightEl = document.createElement('div');
+          rightEl.style.cssText = 'padding:24px;display:flex;align-items:center;justify-content:center;min-height:100%;background:#1a1a24';
+          try {
+            const { svg } = await mermaid.render('mmd-' + Date.now(), text);
+            rightEl.innerHTML = svg;
+          } catch(err) {
+            rightEl.style.cssText = 'padding:20px;color:#ff6b6b;font-size:0.8rem';
+            rightEl.textContent = 'Mermaid error: ' + err.message;
+          }
+
+          area.appendChild(makeSplitPane('Source', leftEl, 'Diagram', rightEl, true));
+        });
+
       // ── Code: syntax highlighted ────────────────────────────────────
-      } else if (['py','js','ts','css','txt'].includes(e)) {
-        const langMap = { py:'python', js:'javascript', ts:'typescript', css:'css', txt:'plaintext' };
+      } else if (['py','js','ts','css','txt','xml','yaml','yml'].includes(e)) {
+        const langMap = { py:'python', js:'javascript', ts:'typescript', css:'css', txt:'plaintext', xml:'xml', yaml:'yaml', yml:'yaml' };
         fetch(url).then(r => r.text()).then(text => {
           area.appendChild(makeCodeBlock(text, langMap[e] || 'plaintext'));
         });
