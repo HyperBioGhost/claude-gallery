@@ -1,1113 +1,1532 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Kiro Artifact Gallery</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #0f0f14;
-      color: #e0e0e0;
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      display: flex;
-      height: 100vh;
-      overflow: hidden;
-    }
-    #sidebar {
-      width: 240px;
-      min-width: 240px;
-      background: #16161f;
-      border-right: 1px solid #2a2a3a;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    #sidebar-header {
-      padding: 16px;
-      border-bottom: 1px solid #2a2a3a;
-      font-size: 0.7rem;
-      letter-spacing: 4px;
-      text-transform: uppercase;
-      color: #00ffcc;
-      text-shadow: 0 0 10px #00ffcc88;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    #conn-dot {
-      width: 7px; height: 7px;
-      border-radius: 50%;
-      background: #555;
-      transition: background 0.3s, box-shadow 0.3s;
-    }
-    #conn-dot.connected { background: #00ffcc; box-shadow: 0 0 8px #00ffcc; }
-    #conn-dot.flash { background: #fff; box-shadow: 0 0 14px #fff; }
-    #file-list { overflow-y: auto; flex: 1; padding: 8px 0; }
-    #sidebar-actions {
-      padding: 8px 12px;
-      border-top: 1px solid #2a2a3a;
-      display: flex;
-      gap: 6px;
-      flex-shrink: 0;
-    }
-    .sidebar-btn {
-      flex: 1;
-      background: #7c3aed22;
-      border: 1px solid #7c3aed55;
-      color: #a78bfa;
-      padding: 10px 8px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.7rem;
-      text-align: center;
-      transition: all 0.15s;
-      font-weight: 500;
-    }
-    .sidebar-btn:hover { background: #7c3aed44; color: #c4b5fd; }
-    .sidebar-btn.active { background: #00ffcc22; border-color: #00ffcc55; color: #00ffcc; }
-    .sidebar-btn.danger { background: #ff6b6b22; border-color: #ff6b6b55; color: #ff6b6b; }
-    .sidebar-btn.danger:hover { background: #ff6b6b44; }
-    .file-item .select-check {
-      display: none;
-      width: 14px; height: 14px;
-      border: 1px solid #555;
-      border-radius: 3px;
-      margin-right: 8px;
-      flex-shrink: 0;
-      cursor: pointer;
-      appearance: none;
-      background: transparent;
-      vertical-align: middle;
-    }
-    .file-item .select-check:checked { background: #00ffcc; border-color: #00ffcc; }
-    body.select-mode .file-item .select-check { display: inline-block; }
-    body.select-mode .file-item { display: flex; align-items: center; }
-    .file-item {
-      padding: 10px 16px;
-      cursor: pointer;
-      border-left: 3px solid transparent;
-      transition: all 0.15s;
-      font-size: 0.8rem;
-      color: #aaa;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .file-item:hover { background: #1e1e2a; color: #fff; }
-    .file-item.active { border-left-color: #00ffcc; background: #1a1a26; color: #00ffcc; }
-    .badge {
-      display: inline-block;
-      font-size: 0.6rem;
-      padding: 1px 5px;
-      border-radius: 3px;
-      margin-right: 6px;
-      text-transform: uppercase;
-      font-weight: bold;
-      vertical-align: middle;
-    }
-    .badge-html { background: #e34c2622; color: #e34c26; }
-    .badge-svg  { background: #ffb30022; color: #ffb300; }
-    .badge-img  { background: #4caf5022; color: #4caf50; }
-    .badge-md   { background: #2196f322; color: #2196f3; }
-    .badge-txt  { background: #9c27b022; color: #ce93d8; }
-    .badge-json { background: #ff572222; color: #ff7043; }
-    .badge-py   { background: #3572a522; color: #6fb3d9; }
-    .badge-js   { background: #f7df1e22; color: #f7df1e; }
-    .badge-ts   { background: #3178c622; color: #5aa0e8; }
-    .badge-css  { background: #56439922; color: #9d7fe0; }
-    .badge-csv  { background: #00968822; color: #26c6a0; }
-    .badge-xml  { background: #e34c2622; color: #e8864a; }
-    .badge-yaml { background: #cb171e22; color: #f06b6b; }
-    .badge-mmd  { background: #ff338822; color: #ff79a8; }
-    .badge-file { background: #55555522; color: #aaa; }
-    .file-item .ts { display: block; font-size: 0.6rem; color: #555; margin-top: 2px; }
-    .new-flash { animation: newflash 2s ease-out forwards; }
-    @keyframes newflash {
-      0%   { background: #00ffcc22; border-left-color: #00ffcc; color: #00ffcc; }
-      100% { background: transparent; border-left-color: transparent; color: #aaa; }
-    }
-    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    #toolbar {
-      padding: 10px 16px;
-      background: #16161f;
-      border-bottom: 1px solid #2a2a3a;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 0.75rem;
-      color: #666;
-      flex-shrink: 0;
-      z-index: 20;
-      position: sticky;
-      top: 0;
-    }
-    #current-file { color: #ccc; font-weight: 500; flex: 1; }
-    #open-btn {
-      background: #1e1e2a;
-      border: 1px solid #2a2a3a;
-      color: #aaa;
-      padding: 4px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.72rem;
-      transition: all 0.15s;
-      text-decoration: none;
-    }
-    #open-btn:hover { background: #2a2a3a; color: #fff; }
-    #edit-btn {
-      background: #1e1e2a;
-      border: 1px solid #2a2a3a;
-      color: #aaa;
-      padding: 4px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.72rem;
-      transition: all 0.15s;
-      display: none;
-    }
-    #edit-btn:hover { background: #2a2a3a; color: #fff; }
-    #edit-btn.active { background: #00ffcc22; border-color: #00ffcc55; color: #00ffcc; }
-    #editor-wrap { display: none; width: 100%; height: 100%; flex-direction: column; }
-    #editor-wrap.visible { display: flex; }
-    #editor-body { flex: 1; display: flex; overflow: hidden; }
-    #editor-left { flex: 0 0 50%; display: flex; flex-direction: column; min-width: 80px; }
-    #editor-right { flex: 1; display: none; flex-direction: column; min-width: 80px; overflow: hidden; }
-    #editor-right.visible { display: flex; }
-    #editor-live { flex: 1; overflow: auto; }
-    #editor-textarea {
-      flex: 1;
-      background: #0d0d12;
-      color: #d0d0d0;
-      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-      font-size: 0.8rem;
-      line-height: 1.65;
-      padding: 20px 24px;
-      border: none;
-      resize: none;
-      outline: none;
-      tab-size: 4;
-    }
-    #save-status { font-size: 0.65rem; color: #555; }
-    #save-btn {
-      background: #00ffcc22;
-      border: 1px solid #00ffcc55;
-      color: #00ffcc;
-      padding: 4px 14px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.72rem;
-      transition: all 0.15s;
-    }
-    #save-btn:hover { background: #00ffcc44; }
-    #saveas-btn {
-      background: #1e1e2a;
-      border: 1px solid #2a2a3a;
-      color: #aaa;
-      padding: 4px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.72rem;
-      transition: all 0.15s;
-    }
-    #saveas-btn:hover { background: #2a2a3a; color: #fff; }
-    #export-dropdown-wrap { position: relative; display: inline-block; }
-    #export-btn {
-      background: #1e1e2a;
-      border: 1px solid #2a2a3a;
-      color: #aaa;
-      padding: 4px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.72rem;
-      transition: all 0.15s;
-    }
-    #export-btn:hover { background: #2a2a3a; color: #fff; }
-    #export-menu {
-      position: absolute;
-      top: 100%;
-      right: 0;
-      margin-top: 4px;
-      background: #1e1e2a;
-      border: 1px solid #2a2a3a;
-      border-radius: 6px;
-      min-width: 200px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-      z-index: 100;
-      overflow: hidden;
-    }
-    .export-item {
-      padding: 8px 14px;
-      font-size: 0.72rem;
-      color: #ccc;
-      cursor: pointer;
-      transition: background 0.1s;
-      white-space: nowrap;
-    }
-    .export-item:hover { background: #00ffcc22; color: #00ffcc; }
-    #preview-area { flex: 1; overflow: hidden; position: relative; background: #0f0f14; }
-    iframe { width: 100%; height: 100%; border: none; background: #fff; }
+<meta charset="utf-8">
+<title>Claude Gallery</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<style>
+  :root {
+    --ink: oklch(22% 0.03 260);
+    --ink-soft: oklch(38% 0.02 260);
+    --ink-faint: oklch(55% 0.015 260);
+    --paper: oklch(98.5% 0.005 90);
+    --paper-warm: oklch(96.5% 0.012 80);
+    --rule: oklch(88% 0.01 260);
+    --accent: oklch(58% 0.19 28);
+    --accent-2: oklch(48% 0.14 200);
+    --highlight: oklch(94% 0.09 95);
+    --code-bg: oklch(96% 0.008 260);
+    --danger: oklch(55% 0.22 28);
+    --success: oklch(52% 0.16 155);
+    --card-shadow: 0 2px 8px oklch(0% 0 0 / 0.06), 0 1px 3px oklch(0% 0 0 / 0.04);
+    --card-shadow-hover: 0 8px 24px oklch(0% 0 0 / 0.1), 0 2px 8px oklch(0% 0 0 / 0.06);
+    --serif: "Iowan Old Style","Palatino Linotype","Palatino","Book Antiqua",Georgia,serif;
+    --sans: "Inter","Helvetica Neue","Segoe UI",system-ui,sans-serif;
+    --mono: "JetBrains Mono","Consolas","SF Mono",ui-monospace,monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--paper); color: var(--ink); height: 100%; }
+  body { font-family: var(--sans); -webkit-font-smoothing: antialiased; }
 
-    /* ── Image ── */
-    #img-preview {
-      width: 100%; height: 100%;
-      display: flex; align-items: center; justify-content: center; overflow: auto;
-    }
-    #img-preview img { max-width: 90%; max-height: 90%; object-fit: contain; border-radius: 4px; box-shadow: 0 4px 40px #00000080; }
+  /* ── Homepage ─────────────────────────────────────────────────── */
+  #homepage { min-height: 100vh; display: flex; flex-direction: column; }
 
-    /* ── Plain text fallback ── */
-    #text-preview {
-      width: 100%; height: 100%;
-      overflow: auto; padding: 24px;
-      font-family: 'Courier New', monospace;
-      font-size: 0.8rem; line-height: 1.6; color: #ccc;
-      white-space: pre-wrap; word-break: break-all;
-    }
+  .home-header {
+    padding: 48px 56px 0;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  .home-title {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(42px, 6vw, 72px);
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    margin-bottom: 8px;
+  }
+  .home-title em { font-style: italic; color: var(--accent); }
+  .home-sub {
+    font-size: 15px;
+    color: var(--ink-faint);
+    margin-bottom: 40px;
+  }
 
-    /* ── CSV table ── */
-    #csv-preview { width: 100%; height: 100%; overflow: auto; padding: 16px; }
-    #csv-preview table { border-collapse: collapse; font-size: 0.78rem; min-width: 100%; }
-    #csv-preview th { background: #1e1e2a; color: #00ffcc; padding: 7px 12px; text-align: left; border-bottom: 2px solid #2a2a3a; white-space: nowrap; position: sticky; top: 0; }
-    #csv-preview td { padding: 6px 12px; border-bottom: 1px solid #1a1a24; color: #ccc; white-space: nowrap; }
-    #csv-preview tr:hover td { background: #1a1a26; }
-    #csv-preview .row-count { font-size: 0.65rem; color: #555; margin-bottom: 10px; }
+  /* Search */
+  .search-wrap {
+    max-width: 560px;
+    position: relative;
+    margin-bottom: 48px;
+  }
+  .search-wrap svg {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px; height: 18px;
+    color: var(--ink-faint);
+  }
+  #search {
+    width: 100%;
+    padding: 14px 16px 14px 44px;
+    font-size: 16px;
+    font-family: var(--sans);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: white;
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  #search:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px oklch(58% 0.19 28 / 0.1);
+  }
+  #search::placeholder { color: var(--ink-faint); }
+  .search-count {
+    font-size: 12px;
+    color: var(--ink-faint);
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
 
-    /* ── Split pane (md / json) ── */
-    .split-pane { display: flex; width: 100%; height: 100%; overflow: hidden; }
-    .split-half { flex: 0 0 50%; display: flex; flex-direction: column; overflow: hidden; min-width: 80px; }
-    .split-half:last-child { flex: 1; }
-    .divider {
-      width: 5px;
-      background: #1a1a24;
-      cursor: col-resize;
-      flex-shrink: 0;
-      transition: background 0.15s;
-      position: relative;
-      z-index: 10;
-    }
-    .divider:hover, .divider.dragging { background: #00ffcc55; }
-    .split-label {
-      font-size: 0.6rem; color: #555; letter-spacing: 2px;
-      text-transform: uppercase; padding: 5px 14px;
-      border-bottom: 1px solid #1a1a24; background: #0d0d12;
-      flex-shrink: 0;
-    }
-    .split-scroll { flex: 1; overflow: auto; }
+  /* Grid */
+  .grid-wrap {
+    flex: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 56px 80px;
+    width: 100%;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 28px;
+  }
+  .card {
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: var(--card-shadow);
+    position: relative;
+  }
+  .card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--card-shadow-hover);
+  }
+  .card-preview {
+    height: 160px;
+    overflow: hidden;
+    background: var(--paper-warm);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card-preview iframe {
+    width: 200%;
+    height: 200%;
+    transform: scale(0.5);
+    transform-origin: top left;
+    border: none;
+    pointer-events: none;
+    position: absolute;
+    top: 0; left: 0;
+  }
+  .card-preview img {
+    max-width: 85%;
+    max-height: 85%;
+    object-fit: contain;
+  }
+  .card-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+  }
+  .card-icon .type-badge {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 5px;
+    letter-spacing: 0.04em;
+  }
+  .type-html { background: oklch(92% 0.06 28); color: oklch(45% 0.16 28); }
+  .type-svg { background: oklch(92% 0.06 80); color: oklch(45% 0.14 80); }
+  .type-img { background: oklch(92% 0.06 145); color: oklch(40% 0.14 145); }
+  .type-md { background: oklch(92% 0.05 260); color: oklch(40% 0.12 260); }
+  .type-json { background: oklch(92% 0.06 50); color: oklch(42% 0.16 50); }
+  .type-py { background: oklch(92% 0.05 230); color: oklch(40% 0.14 230); }
+  .type-js { background: oklch(92% 0.08 95); color: oklch(42% 0.15 95); }
+  .type-ts { background: oklch(92% 0.06 240); color: oklch(40% 0.14 240); }
+  .type-css { background: oklch(92% 0.06 300); color: oklch(40% 0.14 300); }
+  .type-csv { background: oklch(92% 0.05 170); color: oklch(40% 0.12 170); }
+  .type-xml { background: oklch(92% 0.05 28); color: oklch(42% 0.12 28); }
+  .type-yaml { background: oklch(92% 0.04 350); color: oklch(42% 0.12 350); }
+  .type-mmd { background: oklch(92% 0.06 330); color: oklch(42% 0.14 330); }
+  .type-txt { background: oklch(94% 0.02 260); color: oklch(45% 0.03 260); }
+  .type-file { background: oklch(94% 0.01 260); color: oklch(50% 0.02 260); }
 
-    /* ── Syntax highlight (hljs overrides) ── */
-    .hljs-wrap { width: 100%; min-height: 100%; overflow: visible; }
-    .hljs-wrap pre { margin: 0; min-height: 100%; }
-    .hljs-wrap pre code.hljs {
-      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace !important;
-      font-size: 0.78rem !important;
-      line-height: 1.65 !important;
-      padding: 20px 24px !important;
-      background: #0f0f14 !important;
-      display: block;
-      white-space: pre;
-      tab-size: 4;
-    }
+  .card-info {
+    padding: 14px 16px;
+    border-top: 1px solid var(--rule);
+  }
+  .card-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+  }
+  .card-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+  .card-meta .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 3px;
+    text-transform: uppercase;
+  }
 
-    /* ── Markdown rendered ── */
-    .md-rendered {
-      padding: 24px 28px;
-      color: #d0d0d0;
-      line-height: 1.75;
-      font-size: 0.85rem;
-    }
-    .md-rendered h1, .md-rendered h2, .md-rendered h3,
-    .md-rendered h4, .md-rendered h5, .md-rendered h6 { color: #00ffcc; margin: 1.4em 0 0.5em; font-weight: 600; }
-    .md-rendered h1 { font-size: 1.5rem; border-bottom: 1px solid #2a2a3a; padding-bottom: 0.3em; }
-    .md-rendered h2 { font-size: 1.2rem; }
-    .md-rendered h3 { font-size: 1rem; }
-    .md-rendered p { margin: 0.6em 0; }
-    .md-rendered strong { color: #fff; }
-    .md-rendered em { color: #b0c4de; }
-    .md-rendered code {
-      background: #1e1e2a; padding: 2px 6px; border-radius: 3px;
-      font-family: 'Cascadia Code', 'Consolas', monospace;
-      font-size: 0.82em; color: #00ffcc;
-    }
-    .md-rendered pre {
-      background: #1a1a24; border: 1px solid #2a2a3a;
-      border-radius: 5px; padding: 14px 16px; overflow-x: auto; margin: 0.8em 0;
-    }
-    .md-rendered pre code { background: none; padding: 0; color: #ccc; font-size: 0.8em; }
-    .md-rendered a { color: #6fb3d9; text-decoration: none; }
-    .md-rendered a:hover { text-decoration: underline; }
-    .md-rendered ul, .md-rendered ol { padding-left: 1.6em; margin: 0.5em 0; }
-    .md-rendered li { margin: 0.3em 0; }
-    .md-rendered table { border-collapse: collapse; width: 100%; margin: 0.8em 0; font-size: 0.82rem; }
-    .md-rendered th { background: #1e1e2a; color: #00ffcc; padding: 6px 12px; text-align: left; border-bottom: 2px solid #2a2a3a; }
-    .md-rendered td { padding: 5px 12px; border-bottom: 1px solid #1a1a24; }
-    .md-rendered blockquote { border-left: 3px solid #00ffcc55; padding: 4px 12px; color: #888; margin: 0.8em 0; background: #1a1a2a; border-radius: 0 4px 4px 0; }
-    .md-rendered hr { border: none; border-top: 1px solid #2a2a3a; margin: 1.4em 0; }
-    .md-rendered img { max-width: 100%; border-radius: 4px; }
+  /* Select mode cards */
+  .card .select-check {
+    display: none;
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--rule);
+    border-radius: 4px;
+    background: white;
+    cursor: pointer;
+    z-index: 5;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  .card .select-check:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .card .select-check:checked::after {
+    content: "\2713";
+    color: white;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+  }
+  body.select-mode .card .select-check { display: block; }
+  body.select-mode .card { cursor: default; }
+  body.select-mode .card:hover { transform: none; }
 
-    /* ── Empty state ── */
-    #empty-state {
-      width: 100%; height: 100%;
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      color: #2a2a3a; gap: 12px;
-    }
-    #empty-state .icon { font-size: 3rem; }
-    #empty-state .msg { font-size: 0.85rem; letter-spacing: 3px; text-transform: uppercase; }
+  /* Home toolbar (select/delete) */
+  .home-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .home-action-btn {
+    background: white;
+    border: 1px solid var(--rule);
+    color: var(--ink-soft);
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--sans);
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+  .home-action-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .home-action-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+  .home-action-btn.danger { border-color: var(--danger); color: var(--danger); }
+  .home-action-btn.danger:hover { background: var(--danger); color: white; }
 
-    #status-bar {
-      padding: 5px 16px;
-      background: #0d0d12;
-      border-top: 1px solid #1a1a24;
-      font-size: 0.65rem;
-      color: #444;
-      display: flex;
-      gap: 16px;
-    }
-  </style>
+  /* Empty state */
+  .empty-state {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--ink-faint);
+  }
+  .empty-state .icon { font-size: 2rem; margin-bottom: 12px; opacity: 0.4; }
+  .empty-state .msg { font-size: 14px; }
+
+  /* ── Detail View ──────────────────────────────────────────────── */
+  #detail-view { display: none; height: 100vh; flex-direction: column; }
+  #detail-view.visible { display: flex; }
+  #homepage.hidden { display: none; }
+
+  .detail-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--rule);
+    background: white;
+    flex-shrink: 0;
+    z-index: 20;
+  }
+  .back-btn {
+    background: none;
+    border: 1px solid var(--rule);
+    color: var(--ink-soft);
+    padding: 6px 14px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: var(--sans);
+    transition: all 0.15s;
+  }
+  .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .detail-filename {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .toolbar-btn {
+    background: white;
+    border: 1px solid var(--rule);
+    color: var(--ink-soft);
+    padding: 6px 14px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--sans);
+    font-weight: 500;
+    transition: all 0.15s;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .toolbar-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .toolbar-btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .toolbar-btn.primary:hover { opacity: 0.85; color: white; }
+  .toolbar-btn.active {
+    background: oklch(94% 0.06 28);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .toolbar-btn[style*="display: none"] { display: none; }
+
+  /* Save status */
+  .save-status {
+    font-size: 11px;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+  .save-status.success { color: var(--success); }
+  .save-status.error { color: var(--danger); }
+
+  /* Export dropdown */
+  .export-wrap {
+    position: relative;
+    display: inline-block;
+  }
+  .export-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    min-width: 220px;
+    box-shadow: 0 8px 24px oklch(0% 0 0 / 0.12);
+    z-index: 100;
+    overflow: hidden;
+    display: none;
+  }
+  .export-menu.visible { display: block; }
+  .export-item {
+    padding: 10px 16px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: background 0.1s;
+    white-space: nowrap;
+  }
+  .export-item:hover { background: oklch(96% 0.04 28); color: var(--accent); }
+
+  .detail-body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* Sidebar (hidden by default in detail) */
+  .detail-sidebar {
+    width: 240px;
+    min-width: 240px;
+    background: var(--paper-warm);
+    border-right: 1px solid var(--rule);
+    overflow-y: auto;
+    display: none;
+    flex-shrink: 0;
+  }
+  .detail-sidebar.visible { display: block; }
+  .sidebar-file {
+    padding: 10px 16px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    border-bottom: 1px solid oklch(92% 0.005 260);
+    transition: background 0.1s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sidebar-file:hover { background: white; }
+  .sidebar-file.active { background: white; color: var(--accent); font-weight: 500; }
+
+  .detail-preview {
+    flex: 1;
+    overflow: hidden;
+    background: white;
+    position: relative;
+  }
+  .detail-preview iframe {
+    width: 100%; height: 100%; border: none;
+  }
+  .detail-preview img {
+    max-width: 90%; max-height: 90%;
+    object-fit: contain;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+  .detail-preview .text-view {
+    width: 100%; height: 100%;
+    overflow: auto;
+    padding: 32px 40px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--ink);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* ── Editor ───────────────────────────────────────────────────── */
+  .editor-wrap {
+    display: none;
+    width: 100%;
+    height: 100%;
+    flex-direction: column;
+  }
+  .editor-wrap.visible { display: flex; }
+  .editor-body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+  .editor-left {
+    flex: 0 0 50%;
+    display: flex;
+    flex-direction: column;
+    min-width: 80px;
+  }
+  .editor-right {
+    flex: 1;
+    display: none;
+    flex-direction: column;
+    min-width: 80px;
+    overflow: hidden;
+  }
+  .editor-right.visible { display: flex; }
+  .editor-live {
+    flex: 1;
+    overflow: auto;
+  }
+  .editor-textarea {
+    flex: 1;
+    background: var(--code-bg);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.65;
+    padding: 20px 24px;
+    border: none;
+    resize: none;
+    outline: none;
+    tab-size: 4;
+  }
+
+  /* ── Split pane ───────────────────────────────────────────────── */
+  .split-pane { display: flex; width: 100%; height: 100%; overflow: hidden; }
+  .split-half { flex: 0 0 50%; display: flex; flex-direction: column; overflow: hidden; min-width: 80px; }
+  .split-half:last-child { flex: 1; }
+  .split-label {
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 6px 16px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper-warm);
+    flex-shrink: 0;
+    font-weight: 500;
+  }
+  .split-scroll { flex: 1; overflow: auto; }
+
+  /* Divider */
+  .divider {
+    width: 5px;
+    background: var(--rule);
+    cursor: col-resize;
+    flex-shrink: 0;
+    transition: background 0.15s;
+    position: relative;
+    z-index: 10;
+  }
+  .divider:hover, .divider.dragging { background: var(--accent); }
+
+  /* ── Syntax highlight overrides ──────────────────────────────── */
+  .hljs-wrap { width: 100%; min-height: 100%; overflow: visible; }
+  .hljs-wrap pre { margin: 0; min-height: 100%; }
+  .hljs-wrap pre code.hljs {
+    font-family: var(--mono) !important;
+    font-size: 13px !important;
+    line-height: 1.65 !important;
+    padding: 20px 24px !important;
+    background: var(--code-bg) !important;
+    display: block;
+    white-space: pre;
+    tab-size: 4;
+  }
+
+  /* ── Markdown rendered ──────────────────────────────────────── */
+  .md-rendered {
+    padding: 28px 32px;
+    color: var(--ink);
+    line-height: 1.75;
+    font-size: 14px;
+  }
+  .md-rendered h1, .md-rendered h2, .md-rendered h3,
+  .md-rendered h4, .md-rendered h5, .md-rendered h6 {
+    color: var(--ink);
+    margin: 1.4em 0 0.5em;
+    font-weight: 600;
+    font-family: var(--serif);
+  }
+  .md-rendered h1 { font-size: 1.6rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .md-rendered h2 { font-size: 1.3rem; }
+  .md-rendered h3 { font-size: 1.1rem; }
+  .md-rendered p { margin: 0.6em 0; }
+  .md-rendered strong { color: var(--ink); }
+  .md-rendered em { color: var(--ink-soft); }
+  .md-rendered code {
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 0.85em;
+    color: var(--accent);
+  }
+  .md-rendered pre {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 0.8em 0;
+  }
+  .md-rendered pre code { background: none; padding: 0; color: var(--ink); font-size: 0.85em; }
+  .md-rendered a { color: var(--accent-2); text-decoration: none; }
+  .md-rendered a:hover { text-decoration: underline; }
+  .md-rendered ul, .md-rendered ol { padding-left: 1.6em; margin: 0.5em 0; }
+  .md-rendered li { margin: 0.3em 0; }
+  .md-rendered table { border-collapse: collapse; width: 100%; margin: 0.8em 0; font-size: 0.88rem; }
+  .md-rendered th { background: var(--paper-warm); color: var(--ink); padding: 8px 12px; text-align: left; border-bottom: 2px solid var(--rule); font-weight: 600; }
+  .md-rendered td { padding: 7px 12px; border-bottom: 1px solid var(--rule); }
+  .md-rendered blockquote { border-left: 3px solid var(--accent); padding: 4px 14px; color: var(--ink-soft); margin: 0.8em 0; background: var(--paper-warm); border-radius: 0 6px 6px 0; }
+  .md-rendered hr { border: none; border-top: 1px solid var(--rule); margin: 1.4em 0; }
+  .md-rendered img { max-width: 100%; border-radius: 6px; }
+
+  /* ── CSV table ──────────────────────────────────────────────── */
+  .csv-preview { width: 100%; height: 100%; overflow: auto; padding: 20px 24px; }
+  .csv-preview table { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+  .csv-preview th { background: var(--paper-warm); color: var(--ink); padding: 9px 14px; text-align: left; border-bottom: 2px solid var(--rule); white-space: nowrap; position: sticky; top: 0; font-weight: 600; font-size: 12px; }
+  .csv-preview td { padding: 8px 14px; border-bottom: 1px solid var(--rule); color: var(--ink-soft); white-space: nowrap; }
+  .csv-preview tr:hover td { background: var(--paper-warm); }
+  .csv-preview .row-count { font-size: 11px; color: var(--ink-faint); margin-bottom: 12px; }
+
+  /* Hamburger */
+  .hamburger {
+    background: none;
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 6px 10px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    transition: border-color 0.15s;
+  }
+  .hamburger:hover { border-color: var(--accent); }
+  .hamburger span {
+    display: block;
+    width: 16px;
+    height: 2px;
+    background: var(--ink-soft);
+    border-radius: 1px;
+  }
+
+  /* ── Server down ────────────────────────────────────────────── */
+  .server-down {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 16px;
+    padding: 40px;
+    text-align: center;
+  }
+  .server-down .icon { font-size: 2.5rem; opacity: 0.3; }
+  .server-down .title { color: var(--danger); font-size: 16px; font-weight: 600; }
+  .server-down .desc { color: var(--ink-faint); font-size: 13px; line-height: 1.8; max-width: 400px; }
+  .server-down button {
+    margin-top: 12px;
+    background: white;
+    border: 1px solid var(--rule);
+    color: var(--ink-soft);
+    padding: 8px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--sans);
+  }
+  .server-down button:hover { border-color: var(--accent); color: var(--accent); }
+
+  @media (max-width: 768px) {
+    .home-header { padding: 32px 24px 0; }
+    .grid-wrap { padding: 0 24px 60px; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+    .card-preview { height: 120px; }
+  }
+</style>
 </head>
 <body>
-  <div id="sidebar">
-    <div id="sidebar-header"><div id="conn-dot"></div>Artifacts</div>
-    <div id="file-list"></div>
-    <div id="sidebar-actions">
-      <button class="sidebar-btn" id="select-btn" onclick="toggleSelectMode()">Select</button>
-      <button class="sidebar-btn danger" id="delete-btn" onclick="deleteSelected()" style="display:none">Delete</button>
+
+<!-- ═══ HOMEPAGE ═══ -->
+<div id="homepage">
+  <div class="home-header">
+    <h1 class="home-title"><em>Gallery</em></h1>
+    <p class="home-sub" id="file-count">Loading artifacts...</p>
+    <div class="search-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input type="text" id="search" placeholder="Search artifacts..." autocomplete="off">
+      <span class="search-count" id="search-count"></span>
+    </div>
+    <div class="home-actions">
+      <button class="home-action-btn" id="select-mode-btn" onclick="toggleSelectMode()">Select</button>
+      <button class="home-action-btn danger" id="delete-selected-btn" onclick="deleteSelected()" style="display:none">Delete Selected</button>
     </div>
   </div>
-  <div id="main">
-    <div id="toolbar">
-      <span id="current-file">Waiting...</span>
-      <button id="edit-btn" onclick="toggleEdit()">Edit</button>
-      <span id="save-status"></span>
-      <button id="save-btn" onclick="saveEdit()" style="display:none">Save to disk</button>
-      <button id="saveas-btn" onclick="saveAs()">Save As</button>
-      <div id="export-dropdown-wrap" style="display:none">
-        <button id="export-btn" onclick="toggleExportMenu()">Export as &#9662;</button>
-        <div id="export-menu" style="display:none"></div>
-      </div>
-      <a id="open-btn" href="#" target="_blank">Open in tab &#8599;</a>
+  <div class="grid-wrap">
+    <div class="grid" id="grid"></div>
+  </div>
+</div>
+
+<!-- ═══ DETAIL VIEW ═══ -->
+<div id="detail-view">
+  <div class="detail-toolbar">
+    <button class="back-btn" onclick="goHome()">&#8592; Back</button>
+    <button class="hamburger" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
+    <span class="detail-filename" id="detail-filename"></span>
+    <span class="save-status" id="save-status"></span>
+    <button class="toolbar-btn" id="edit-btn" onclick="toggleEdit()" style="display:none">Edit</button>
+    <button class="toolbar-btn primary" id="save-btn" onclick="saveEdit()" style="display:none">Save</button>
+    <button class="toolbar-btn" id="saveas-btn" onclick="saveAs()">Save As</button>
+    <div class="export-wrap" id="export-wrap" style="display:none">
+      <button class="toolbar-btn" id="export-btn" onclick="toggleExportMenu()">Export &#9662;</button>
+      <div class="export-menu" id="export-menu"></div>
     </div>
-    <div id="editor-wrap">
-      <div id="editor-body">
-        <div id="editor-left">
-          <div class="split-label" id="editor-left-label">Edit</div>
-          <textarea id="editor-textarea" spellcheck="false"></textarea>
+    <a class="toolbar-btn" id="detail-open" href="#" target="_blank">Open in tab &#8599;</a>
+  </div>
+  <div class="detail-body">
+    <div class="detail-sidebar" id="detail-sidebar"></div>
+    <div class="detail-preview" id="detail-preview">
+      <!-- Editor overlay -->
+      <div class="editor-wrap" id="editor-wrap">
+        <div class="editor-body" id="editor-body">
+          <div class="editor-left" id="editor-left">
+            <div class="split-label" id="editor-left-label">Edit</div>
+            <textarea class="editor-textarea" id="editor-textarea" spellcheck="false"></textarea>
+          </div>
+          <div class="divider" id="editor-divider"></div>
+          <div class="editor-right" id="editor-right">
+            <div class="split-label">Live Preview</div>
+            <div class="editor-live" id="editor-live"></div>
+          </div>
         </div>
-        <div class="divider" id="editor-divider"></div>
-        <div id="editor-right">
-          <div class="split-label">Live Preview</div>
-          <div id="editor-live"></div>
-        </div>
       </div>
-    </div>
-    <div id="preview-area">
-      <div id="empty-state">
-        <div class="icon">&#10022;</div>
-        <div class="msg">Waiting for artifacts</div>
-      </div>
-    </div>
-    <div id="status-bar">
-      <span id="file-count">0 files</span>
-      <span id="conn-status">Connecting...</span>
     </div>
   </div>
+</div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1/dist/html2canvas.min.js"></script>
-  <script>mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
-  <script>
-    const dot = document.getElementById('conn-dot');
-    const connStatus = document.getElementById('conn-status');
-    let files = [], activeFile = null;
-    const EDITABLE = ['md','json','py','js','ts','css','txt','csv','xml','yaml','yml','mermaid','mmd'];
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1/dist/html2canvas.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: false, theme: 'default' });
 
-    let livePreviewExt = null;
+  let files = [], filtered = [], activeFile = null;
+  let selectMode = false;
+  let editMode = false;
+  let livePreviewExt = null;
 
-    function makeDraggable(divider, leftEl, container) {
-      divider.addEventListener('mousedown', e => {
-        e.preventDefault();
-        divider.classList.add('dragging');
-        const startX = e.clientX;
-        const startW = leftEl.getBoundingClientRect().width;
-        const totalW = container.getBoundingClientRect().width;
+  const EDITABLE = ['md','json','py','js','ts','css','txt','csv','xml','yaml','yml','mermaid','mmd','html','htm','svg'];
 
-        function onMove(e) {
-          const delta = e.clientX - startX;
-          const newW = Math.min(Math.max(startW + delta, 80), totalW - 85);
-          leftEl.style.flex = `0 0 ${newW}px`;
-        }
-        function onUp() {
-          divider.classList.remove('dragging');
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
-        }
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-      });
+  // ── Utilities ─────────────────────────────────────────────────────
+
+  function getExt(name) { return name.includes('.') ? name.split('.').pop().toLowerCase() : ''; }
+
+  function getType(name) {
+    const e = getExt(name);
+    const map = {
+      html:'html', htm:'html', svg:'svg',
+      png:'img', jpg:'img', jpeg:'img', gif:'img', webp:'img',
+      md:'md', json:'json', py:'py', js:'js', ts:'ts', css:'css',
+      csv:'csv', xml:'xml', yaml:'yaml', yml:'yaml',
+      mermaid:'mmd', mmd:'mmd', txt:'txt'
+    };
+    return map[e] || 'file';
+  }
+
+  function timeAgo(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+  }
+
+  function fuzzyMatch(query, text) {
+    const q = query.toLowerCase();
+    const t = text.toLowerCase();
+    if (t.includes(q)) return true;
+    let qi = 0;
+    for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+      if (t[ti] === q[qi]) qi++;
     }
+    return qi === q.length;
+  }
 
-    function updateLivePreview(text) {
-      const live = document.getElementById('editor-live');
-      if (livePreviewExt === 'md') {
-        live.className = 'md-rendered';
-        live.style.padding = '24px 28px';
-        live.innerHTML = marked.parse(text);
-      } else if (livePreviewExt === 'json') {
-        live.className = '';
-        live.innerHTML = '';
-        try {
-          const pretty = JSON.stringify(JSON.parse(text), null, 2);
-          const block = makeCodeBlock(pretty, 'json');
-          block.style.height = '100%';
-          live.appendChild(block);
-        } catch {
-          live.style.cssText = 'padding:20px;color:#ff6b6b;font-size:0.8rem';
-          live.textContent = 'Invalid JSON';
-        }
-      } else if (livePreviewExt === 'csv') {
-        live.className = '';
-        live.innerHTML = '';
-        live.style.cssText = 'padding:16px;overflow:auto';
-        const rows = text.trim().split('\n').map(line => {
-          const cells = []; let cur = '', inQ = false;
-          for (let i = 0; i < line.length; i++) {
-            const c = line[i];
-            if (c === '"') { inQ = !inQ; }
-            else if (c === ',' && !inQ) { cells.push(cur.trim()); cur = ''; }
-            else { cur += c; }
-          }
-          cells.push(cur.trim());
-          return cells;
-        });
-        if (rows.length <= 1 && !rows[0][0]) {
-          live.innerHTML = '<div style="color:#555;font-size:0.75rem;padding:20px">Live table preview will appear as you edit</div>';
-          return;
-        }
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ── Draggable divider ─────────────────────────────────────────────
+
+  function makeDraggable(divider, leftEl, container) {
+    divider.addEventListener('mousedown', e => {
+      e.preventDefault();
+      divider.classList.add('dragging');
+      const startX = e.clientX;
+      const startW = leftEl.getBoundingClientRect().width;
+      const totalW = container.getBoundingClientRect().width;
+
+      function onMove(ev) {
+        const delta = ev.clientX - startX;
+        const newW = Math.min(Math.max(startW + delta, 80), totalW - 85);
+        leftEl.style.flex = '0 0 ' + newW + 'px';
+      }
+      function onUp() {
+        divider.classList.remove('dragging');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  // ── Scroll sync ───────────────────────────────────────────────────
+
+  function syncScroll(source, target) {
+    let ticking = false;
+    source.addEventListener('scroll', () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        const maxS = source.scrollHeight - source.clientHeight;
+        const pct = maxS > 0 ? source.scrollTop / maxS : 0;
+        const maxT = target.scrollHeight - target.clientHeight;
+        target.scrollTop = pct * maxT;
+        ticking = false;
+      });
+    });
+  }
+
+  // ── Code block helper ─────────────────────────────────────────────
+
+  function makeCodeBlock(text, lang) {
+    const wrap = document.createElement('div');
+    wrap.className = 'hljs-wrap';
+    const pre = document.createElement('pre');
+    const code = document.createElement('code');
+    code.className = 'language-' + lang;
+    code.textContent = text;
+    pre.appendChild(code);
+    wrap.appendChild(pre);
+    requestAnimationFrame(() => hljs.highlightElement(code));
+    return wrap;
+  }
+
+  // ── Split pane helper ─────────────────────────────────────────────
+
+  function makeSplitPane(leftLabel, leftEl, rightLabel, rightEl, sync) {
+    const pane = document.createElement('div');
+    pane.className = 'split-pane';
+
+    const left = document.createElement('div');
+    left.className = 'split-half';
+    const lLabel = document.createElement('div');
+    lLabel.className = 'split-label';
+    lLabel.textContent = leftLabel;
+    const lScroll = document.createElement('div');
+    lScroll.className = 'split-scroll';
+    lScroll.appendChild(leftEl);
+    left.appendChild(lLabel);
+    left.appendChild(lScroll);
+
+    const right = document.createElement('div');
+    right.className = 'split-half';
+    const rLabel = document.createElement('div');
+    rLabel.className = 'split-label';
+    rLabel.textContent = rightLabel;
+    const rScroll = document.createElement('div');
+    rScroll.className = 'split-scroll';
+    rScroll.appendChild(rightEl);
+    right.appendChild(rLabel);
+    right.appendChild(rScroll);
+
+    const div = document.createElement('div');
+    div.className = 'divider';
+    pane.appendChild(left);
+    pane.appendChild(div);
+    pane.appendChild(right);
+    requestAnimationFrame(() => makeDraggable(div, left, pane));
+
+    if (sync) {
+      syncScroll(lScroll, rScroll);
+      syncScroll(rScroll, lScroll);
+    }
+    return pane;
+  }
+
+  // ── Homepage ──────────────────────────────────────────────────────
+
+  async function loadFiles() {
+    try {
+      const res = await fetch('/list');
+      const data = await res.json();
+      files = data.files || [];
+      filtered = [...files];
+      renderGrid();
+      document.getElementById('file-count').textContent = files.length + ' artifact' + (files.length !== 1 ? 's' : '');
+    } catch {
+      document.getElementById('grid').innerHTML = '<div class="empty-state"><div class="icon">&#9888;</div><div class="msg">Gallery server is not running</div></div>';
+    }
+  }
+
+  function renderGrid() {
+    const grid = document.getElementById('grid');
+    grid.innerHTML = '';
+    if (filtered.length === 0) {
+      grid.innerHTML = '<div class="empty-state"><div class="icon">&#8709;</div><div class="msg">No artifacts match your search</div></div>';
+      document.getElementById('search-count').textContent = '';
+      return;
+    }
+    const q = document.getElementById('search').value;
+    document.getElementById('search-count').textContent = q ? filtered.length + ' found' : '';
+
+    filtered.forEach(f => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.onclick = () => {
+        if (!selectMode) openDetail(f);
+      };
+
+      // Select checkbox
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.className = 'select-check';
+      check.dataset.name = f.name;
+      check.onclick = (e) => e.stopPropagation();
+      card.appendChild(check);
+
+      const ext = getExt(f.name);
+      const type = getType(f.name);
+      const preview = document.createElement('div');
+      preview.className = 'card-preview';
+
+      if (['html','htm','svg'].includes(ext)) {
+        const iframe = document.createElement('iframe');
+        iframe.src = '/files/' + encodeURIComponent(f.name);
+        iframe.loading = 'lazy';
+        if (ext !== 'svg') iframe.sandbox = 'allow-scripts allow-same-origin';
+        preview.appendChild(iframe);
+      } else if (['png','jpg','jpeg','gif','webp'].includes(ext)) {
+        const img = document.createElement('img');
+        img.src = '/files/' + encodeURIComponent(f.name);
+        img.loading = 'lazy';
+        preview.appendChild(img);
+      } else {
+        preview.innerHTML = '<div class="card-icon"><span class="type-badge type-' + type + '">.' + ext + '</span></div>';
+      }
+
+      const info = document.createElement('div');
+      info.className = 'card-info';
+      info.innerHTML =
+        '<div class="card-name" title="' + f.name + '">' + f.name + '</div>' +
+        '<div class="card-meta">' +
+          '<span>' + timeAgo(f.mtime) + '</span>' +
+          '<span class="badge type-' + type + '">' + type + '</span>' +
+        '</div>';
+
+      card.appendChild(preview);
+      card.appendChild(info);
+      grid.appendChild(card);
+    });
+  }
+
+  // ── Search ────────────────────────────────────────────────────────
+
+  document.getElementById('search').addEventListener('input', e => {
+    const q = e.target.value.trim();
+    if (!q) { filtered = [...files]; }
+    else { filtered = files.filter(f => fuzzyMatch(q, f.name)); }
+    renderGrid();
+  });
+
+  // ── Select Mode & Delete ──────────────────────────────────────────
+
+  function toggleSelectMode() {
+    selectMode = !selectMode;
+    document.body.classList.toggle('select-mode', selectMode);
+    const btn = document.getElementById('select-mode-btn');
+    const delBtn = document.getElementById('delete-selected-btn');
+    btn.classList.toggle('active', selectMode);
+    btn.textContent = selectMode ? 'Cancel' : 'Select';
+    delBtn.style.display = selectMode ? '' : 'none';
+  }
+
+  async function deleteSelected() {
+    const checks = document.querySelectorAll('.card .select-check:checked');
+    const names = Array.from(checks).map(c => c.dataset.name);
+    if (names.length === 0) return;
+    if (!confirm('PERMANENTLY DELETE ' + names.length + ' file' + (names.length > 1 ? 's' : '') + '?\n\nThis cannot be undone.\n\n' + names.join('\n'))) return;
+    try {
+      const res = await fetch('/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: names })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        files = files.filter(f => !data.deleted.includes(f.name));
+        const q = document.getElementById('search').value.trim();
+        if (!q) filtered = [...files];
+        else filtered = files.filter(f => fuzzyMatch(q, f.name));
+        document.getElementById('file-count').textContent = files.length + ' artifact' + (files.length !== 1 ? 's' : '');
+        renderGrid();
+      }
+    } catch(e) { alert('Delete failed: ' + e.message); }
+  }
+
+  // ── Detail View ───────────────────────────────────────────────────
+
+  function openDetail(f) {
+    activeFile = f;
+    cancelEdit();
+    document.getElementById('homepage').classList.add('hidden');
+    document.getElementById('detail-view').classList.add('visible');
+    document.getElementById('detail-filename').textContent = f.name;
+    document.getElementById('detail-open').href = '/files/' + encodeURIComponent(f.name);
+
+    // Show/hide edit button
+    const ext = getExt(f.name);
+    const editBtn = document.getElementById('edit-btn');
+    editBtn.style.display = EDITABLE.includes(ext) ? '' : 'none';
+
+    // Show/hide export
+    const exportWrap = document.getElementById('export-wrap');
+    exportWrap.style.display = getExportOptions(ext).length > 0 ? '' : 'none';
+    document.getElementById('export-menu').classList.remove('visible');
+
+    renderSidebar();
+    renderPreview(f);
+  }
+
+  function goHome() {
+    cancelEdit();
+    document.getElementById('detail-view').classList.remove('visible');
+    document.getElementById('homepage').classList.remove('hidden');
+    document.getElementById('detail-sidebar').classList.remove('visible');
+    activeFile = null;
+    // Refresh grid in case of changes
+    const q = document.getElementById('search').value.trim();
+    if (!q) filtered = [...files];
+    else filtered = files.filter(f => fuzzyMatch(q, f.name));
+    renderGrid();
+  }
+
+  function toggleSidebar() {
+    document.getElementById('detail-sidebar').classList.toggle('visible');
+  }
+
+  function renderSidebar() {
+    const sb = document.getElementById('detail-sidebar');
+    sb.innerHTML = '';
+    files.forEach(f => {
+      const div = document.createElement('div');
+      div.className = 'sidebar-file' + (activeFile && activeFile.name === f.name ? ' active' : '');
+      div.textContent = f.name;
+      div.title = f.name;
+      div.onclick = () => { openDetail(f); };
+      sb.appendChild(div);
+    });
+  }
+
+  // ── Preview Renderer ──────────────────────────────────────────────
+
+  function renderPreview(f) {
+    const area = document.getElementById('detail-preview');
+    // Keep editor-wrap in place but clear the rest
+    const editorWrap = document.getElementById('editor-wrap');
+    area.innerHTML = '';
+    area.appendChild(editorWrap);
+
+    const ext = getExt(f.name);
+    const url = '/files/' + encodeURIComponent(f.name);
+
+    // iframe: html, svg
+    if (['html','htm','svg'].includes(ext)) {
+      const iframe = document.createElement('iframe');
+      iframe.src = url;
+      if (ext !== 'svg') iframe.sandbox = 'allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups';
+      area.appendChild(iframe);
+
+    // Images
+    } else if (['png','jpg','jpeg','gif','webp'].includes(ext)) {
+      const img = document.createElement('img');
+      img.src = url;
+      area.appendChild(img);
+
+    // CSV: table
+    } else if (ext === 'csv') {
+      fetch(url).then(r => r.text()).then(text => {
+        const rows = parseCSV(text);
+        const wrap = document.createElement('div');
+        wrap.className = 'csv-preview';
+        if (rows.length > 1) wrap.innerHTML = '<div class="row-count">' + (rows.length - 1) + ' row' + (rows.length - 1 !== 1 ? 's' : '') + '</div>';
         const table = document.createElement('table');
-        table.style.cssText = 'border-collapse:collapse;font-size:0.78rem;min-width:100%';
         rows.forEach((row, i) => {
           const tr = document.createElement('tr');
           row.forEach(cell => {
             const td = document.createElement(i === 0 ? 'th' : 'td');
             td.textContent = cell.replace(/^"|"$/g, '');
-            td.style.cssText = i === 0
-              ? 'background:#1e1e2a;color:#00ffcc;padding:7px 12px;text-align:left;border-bottom:2px solid #2a2a3a;white-space:nowrap'
-              : 'padding:6px 12px;border-bottom:1px solid #1a1a24;color:#ccc;white-space:nowrap';
             tr.appendChild(td);
           });
           table.appendChild(tr);
         });
-        live.appendChild(table);
-      } else if (['mermaid','mmd'].includes(livePreviewExt)) {
-        live.className = '';
-        live.innerHTML = '';
-        live.style.cssText = 'padding:24px;display:flex;align-items:center;justify-content:center;min-height:100%;background:#1a1a24';
-        try {
-          const id = 'mmd-live-' + Date.now();
-          mermaid.render(id, text).then(({ svg }) => { live.innerHTML = svg; })
-            .catch(err => { live.style.cssText = 'padding:20px;color:#ff6b6b;font-size:0.8rem'; live.textContent = 'Mermaid error: ' + err.message; });
-        } catch(err) {
-          live.style.cssText = 'padding:20px;color:#ff6b6b;font-size:0.8rem';
-          live.textContent = 'Mermaid error: ' + err.message;
-        }
-      }
-    }
-
-    function toggleEdit() {
-      const btn = document.getElementById('edit-btn');
-      const wrap = document.getElementById('editor-wrap');
-      const area = document.getElementById('preview-area');
-      if (wrap.classList.contains('visible')) {
-        cancelEdit();
-      } else {
-        const e = getExt(activeFile.name);
-        const url = '/files/' + encodeURIComponent(activeFile.name);
-        fetch(url).then(r => r.text()).then(text => {
-          const ta = document.getElementById('editor-textarea');
-          const right = document.getElementById('editor-right');
-          ta.value = text;
-          document.getElementById('save-status').textContent = activeFile.name;
-
-          // show live pane only for md and json
-          livePreviewExt = ['md','json','csv','mermaid','mmd'].includes(e) ? e : null;
-          if (livePreviewExt) {
-            right.classList.add('visible');
-            document.getElementById('editor-left-label').textContent = 'Edit';
-            updateLivePreview(text);
-            ta.oninput = () => updateLivePreview(ta.value);
-            const live = document.getElementById('editor-live');
-            ta.onscroll = () => {
-              const maxS = ta.scrollHeight - ta.clientHeight;
-              const pct = maxS > 0 ? ta.scrollTop / maxS : 0;
-              live.scrollTop = pct * (live.scrollHeight - live.clientHeight);
-            };
-            const edDiv = document.getElementById('editor-divider');
-            const edBody = document.getElementById('editor-body');
-            const edLeft = document.getElementById('editor-left');
-            edLeft.style.flex = '0 0 50%';
-            makeDraggable(edDiv, edLeft, edBody);
-          } else {
-            right.classList.remove('visible');
-            document.getElementById('editor-left-label').textContent = 'Edit — ' + activeFile.name;
-            ta.oninput = null;
-          }
-
-          wrap.classList.add('visible');
-          area.style.display = 'none';
-          btn.classList.add('active');
-          btn.textContent = 'Cancel';
-          document.getElementById('save-btn').style.display = 'inline-block';
-          ta.focus();
-        });
-      }
-    }
-
-    function cancelEdit() {
-      const wrap = document.getElementById('editor-wrap');
-      wrap.classList.remove('visible');
-      document.getElementById('editor-right').classList.remove('visible');
-      document.getElementById('editor-textarea').oninput = null;
-      document.getElementById('editor-textarea').onscroll = null;
-      document.getElementById('preview-area').style.display = '';
-      document.getElementById('save-btn').style.display = 'none';
-      const btn = document.getElementById('edit-btn');
-      btn.classList.remove('active');
-      btn.textContent = 'Edit';
-      livePreviewExt = null;
-    }
-
-    async function saveEdit() {
-      const content = document.getElementById('editor-textarea').value;
-      const status = document.getElementById('save-status');
-      status.textContent = 'Saving...';
-      status.style.color = '#aaa';
-      try {
-        const res = await fetch('/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file: activeFile.name, content })
-        });
-        if (res.ok) {
-          status.textContent = 'Saved.';
-          status.style.color = '#00ffcc';
-          setTimeout(() => { status.textContent = activeFile.name; status.style.color = '#555'; }, 2000);
-          cancelEdit();
-          selectFile(activeFile);
-        } else {
-          status.textContent = 'Save failed (' + res.status + ')';
-          status.style.color = '#ff6b6b';
-        }
-      } catch(e) {
-        status.textContent = 'Error: ' + e.message;
-        status.style.color = '#ff6b6b';
-      }
-    }
-
-    async function saveAs() {
-      if (!activeFile) return;
-      const url = '/files/' + encodeURIComponent(activeFile.name);
-      const res = await fetch(url);
-      const blob = await res.blob();
-
-      if (window.showSaveFilePicker) {
-        const ext = activeFile.name.includes('.') ? activeFile.name.split('.').pop().toLowerCase() : '';
-        try {
-          const handle = await window.showSaveFilePicker({
-            suggestedName: activeFile.name,
-            types: ext ? [{ description: ext.toUpperCase() + ' file', accept: { [blob.type || 'application/octet-stream']: ['.' + ext] } }] : []
-          });
-          const writable = await handle.createWritable();
-          await writable.write(blob);
-          await writable.close();
-        } catch(e) {
-          if (e.name !== 'AbortError') alert('Save failed: ' + e.message);
-          return;
-        }
-      } else {
-        downloadBlob(blob, activeFile.name);
-      }
-      const status = document.getElementById('save-status');
-      status.textContent = 'Exported.';
-      status.style.color = '#00ffcc';
-      setTimeout(() => { status.textContent = ''; status.style.color = '#555'; }, 2000);
-    }
-
-    // ── Export as (file type conversion) ─────────────────────────────
-
-    function downloadBlob(blob, filename) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
-
-    function getExportOptions(ext) {
-      if (ext === 'md') return [
-        { label: 'HTML document (.html)', action: exportMdToHtml },
-        { label: 'PDF (via print)', action: exportMdToPdf },
-        { label: 'Word-compatible (.doc)', action: exportMdToDoc },
-      ];
-      if (['html','htm'].includes(ext)) return [
-        { label: 'PDF (via print)', action: exportHtmlToPdf },
-        { label: 'Screenshot (.png)', action: exportHtmlToPng },
-      ];
-      if (['mermaid','mmd'].includes(ext)) return [
-        { label: 'SVG image (.svg)', action: exportMermaidToSvg },
-        { label: 'PNG image (.png)', action: exportMermaidToPng },
-      ];
-      return [];
-    }
-
-    function toggleExportMenu() {
-      const menu = document.getElementById('export-menu');
-      if (menu.style.display !== 'none') { menu.style.display = 'none'; return; }
-      if (!activeFile) return;
-      const options = getExportOptions(getExt(activeFile.name));
-      if (!options.length) return;
-      menu.innerHTML = '';
-      options.forEach(opt => {
-        const item = document.createElement('div');
-        item.className = 'export-item';
-        item.textContent = opt.label;
-        item.onclick = () => { menu.style.display = 'none'; opt.action(); };
-        menu.appendChild(item);
-      });
-      menu.style.display = 'block';
-    }
-
-    document.addEventListener('click', e => {
-      const wrap = document.getElementById('export-dropdown-wrap');
-      if (wrap && !wrap.contains(e.target)) {
-        document.getElementById('export-menu').style.display = 'none';
-      }
-    });
-
-    async function exportMdToHtml() {
-      const text = await (await fetch('/files/' + encodeURIComponent(activeFile.name))).text();
-      const rendered = marked.parse(text);
-      const title = activeFile.name.replace(/\.md$/i, '');
-      const html = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<title>${title}</title>\n<style>\n  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #333; }\n  pre { background: #f5f5f5; padding: 14px; border-radius: 5px; overflow-x: auto; }\n  code { background: #f0f0f0; padding: 2px 5px; border-radius: 3px; font-size: 0.9em; }\n  pre code { background: none; padding: 0; }\n  blockquote { border-left: 3px solid #ddd; margin: 1em 0; padding: 0.5em 1em; color: #666; }\n  table { border-collapse: collapse; width: 100%; margin: 1em 0; }\n  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }\n  th { background: #f5f5f5; }\n  img { max-width: 100%; }\n</style>\n</head>\n<body>\n${rendered}\n</body>\n</html>`;
-      downloadBlob(new Blob([html], { type: 'text/html' }), title + '.html');
-    }
-
-    async function exportMdToPdf() {
-      const text = await (await fetch('/files/' + encodeURIComponent(activeFile.name))).text();
-      const rendered = marked.parse(text);
-      const w = window.open('', '_blank');
-      w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${activeFile.name}</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.7;color:#333}pre{background:#f5f5f5;padding:14px;border-radius:5px;overflow-x:auto}code{background:#f0f0f0;padding:2px 5px;border-radius:3px}pre code{background:none;padding:0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px 12px}th{background:#f5f5f5}</style></head><body>${rendered}</body></html>`);
-      w.document.close();
-      setTimeout(() => w.print(), 500);
-    }
-
-    async function exportMdToDoc() {
-      const text = await (await fetch('/files/' + encodeURIComponent(activeFile.name))).text();
-      const rendered = marked.parse(text);
-      const doc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><title>${activeFile.name}</title><!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]--><style>body{font-family:Calibri,sans-serif;line-height:1.6}table{border-collapse:collapse}th,td{border:1px solid #999;padding:6px 10px}</style></head><body>${rendered}</body></html>`;
-      downloadBlob(new Blob([doc], { type: 'application/msword' }), activeFile.name.replace(/\.md$/i, '.doc'));
-    }
-
-    function exportHtmlToPdf() {
-      const w = window.open('/files/' + encodeURIComponent(activeFile.name), '_blank');
-      setTimeout(() => w.print(), 1000);
-    }
-
-    async function exportHtmlToPng() {
-      const iframe = document.querySelector('#preview-area iframe');
-      if (!iframe) { alert('No preview found'); return; }
-      try {
-        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-        const canvas = await html2canvas(iframeDoc.body, { backgroundColor: '#ffffff', scale: 2, useCORS: true });
-        canvas.toBlob(blob => {
-          downloadBlob(blob, activeFile.name.replace(/\.(html|htm)$/i, '.png'));
-        }, 'image/png');
-      } catch(e) {
-        alert('Screenshot failed: ' + e.message + '\n\nTip: Try "Open in tab" and use your OS screenshot tool instead.');
-      }
-    }
-
-    function exportMermaidToSvg() {
-      const svgEl = document.querySelector('#preview-area .split-half:last-child svg') ||
-                    document.querySelector('#editor-live svg');
-      if (!svgEl) { alert('No rendered diagram found.'); return; }
-      const svgData = new XMLSerializer().serializeToString(svgEl);
-      downloadBlob(new Blob([svgData], { type: 'image/svg+xml' }), activeFile.name.replace(/\.(mermaid|mmd)$/i, '.svg'));
-    }
-
-    async function exportMermaidToPng() {
-      const svgEl = document.querySelector('#preview-area .split-half:last-child svg') ||
-                    document.querySelector('#editor-live svg');
-      if (!svgEl) { alert('No rendered diagram found.'); return; }
-      const svgData = new XMLSerializer().serializeToString(svgEl);
-      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const svgUrl = URL.createObjectURL(svgBlob);
-      const img = new Image();
-      img.onload = () => {
-        const scale = 2;
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth * scale;
-        canvas.height = img.naturalHeight * scale;
-        const ctx = canvas.getContext('2d');
-        ctx.scale(scale, scale);
-        ctx.drawImage(img, 0, 0);
-        URL.revokeObjectURL(svgUrl);
-        canvas.toBlob(blob => {
-          downloadBlob(blob, activeFile.name.replace(/\.(mermaid|mmd)$/i, '.png'));
-        }, 'image/png');
-      };
-      img.onerror = () => { URL.revokeObjectURL(svgUrl); alert('Failed to rasterize SVG to PNG.'); };
-      img.src = svgUrl;
-    }
-
-    function getExt(name) { return name.includes('.') ? name.split('.').pop().toLowerCase() : ''; }
-
-    function badge(name) {
-      const e = getExt(name);
-      const map = {
-        html:'html', htm:'html', svg:'svg',
-        png:'img', jpg:'img', jpeg:'img', gif:'img', webp:'img',
-        md:'md', txt:'txt',
-        json:'json', py:'py',
-        js:'js', ts:'ts', css:'css',
-        csv:'csv',
-        xml:'xml', yaml:'yaml', yml:'yaml',
-        mermaid:'mmd', mmd:'mmd'
-      };
-      return map[e] || 'file';
-    }
-
-    function timeAgo(ts) {
-      const s = Math.floor((Date.now() - ts) / 1000);
-      if (s < 5)  return 'just now';
-      if (s < 60) return s + 's ago';
-      if (s < 3600) return Math.floor(s/60) + 'm ago';
-      return Math.floor(s/3600) + 'h ago';
-    }
-
-    // ── Helpers ────────────────────────────────────────────────────────
-
-    function makeCodeBlock(text, lang) {
-      const wrap = document.createElement('div');
-      wrap.className = 'hljs-wrap';
-      const pre = document.createElement('pre');
-      const code = document.createElement('code');
-      code.className = `language-${lang}`;
-      code.textContent = text;
-      pre.appendChild(code);
-      wrap.appendChild(pre);
-      // highlight after appending so hljs can read dimensions
-      requestAnimationFrame(() => hljs.highlightElement(code));
-      return wrap;
-    }
-
-    function syncScroll(source, target) {
-      let ticking = false;
-      source.addEventListener('scroll', () => {
-        if (ticking) return;
-        ticking = true;
-        requestAnimationFrame(() => {
-          const maxS = source.scrollHeight - source.clientHeight;
-          const pct = maxS > 0 ? source.scrollTop / maxS : 0;
-          const maxT = target.scrollHeight - target.clientHeight;
-          target.scrollTop = pct * maxT;
-          ticking = false;
-        });
-      });
-    }
-
-    function makeSplitPane(leftLabel, leftEl, rightLabel, rightEl, sync) {
-      const pane = document.createElement('div');
-      pane.className = 'split-pane';
-
-      const left = document.createElement('div');
-      left.className = 'split-half';
-      const lLabel = document.createElement('div');
-      lLabel.className = 'split-label';
-      lLabel.textContent = leftLabel;
-      const lScroll = document.createElement('div');
-      lScroll.className = 'split-scroll';
-      lScroll.appendChild(leftEl);
-      left.appendChild(lLabel);
-      left.appendChild(lScroll);
-
-      const right = document.createElement('div');
-      right.className = 'split-half';
-      const rLabel = document.createElement('div');
-      rLabel.className = 'split-label';
-      rLabel.textContent = rightLabel;
-      const rScroll = document.createElement('div');
-      rScroll.className = 'split-scroll';
-      rScroll.appendChild(rightEl);
-      right.appendChild(rLabel);
-      right.appendChild(rScroll);
-
-      const div = document.createElement('div');
-      div.className = 'divider';
-      pane.appendChild(left);
-      pane.appendChild(div);
-      pane.appendChild(right);
-      requestAnimationFrame(() => makeDraggable(div, left, pane));
-
-      if (sync) {
-        syncScroll(lScroll, rScroll);
-        syncScroll(rScroll, lScroll);
-      }
-      return pane;
-    }
-
-    // ── File list ──────────────────────────────────────────────────────
-
-    async function loadList() {
-      const res = await fetch('/list');
-      const data = await res.json();
-      files = data.files || [];
-      renderList();
-      document.getElementById('file-count').textContent = files.length + ' file' + (files.length !== 1 ? 's' : '');
-      if (files.length > 0 && !activeFile) selectFile(files[0]);
-    }
-
-    let selectMode = false;
-
-    function toggleSelectMode() {
-      selectMode = !selectMode;
-      document.body.classList.toggle('select-mode', selectMode);
-      const btn = document.getElementById('select-btn');
-      const delBtn = document.getElementById('delete-btn');
-      btn.classList.toggle('active', selectMode);
-      btn.textContent = selectMode ? 'Cancel' : 'Select';
-      delBtn.style.display = selectMode ? '' : 'none';
-      renderList();
-    }
-
-    async function deleteSelected() {
-      const checks = document.querySelectorAll('.select-check:checked');
-      const names = Array.from(checks).map(c => c.dataset.name);
-      if (names.length === 0) return;
-      if (!confirm(`PERMANENTLY DELETE ${names.length} file${names.length > 1 ? 's' : ''}?\n\nThis cannot be undone. Files will be deleted from disk, not moved to recycle bin.\n\n${names.join('\n')}`)) return;
-      try {
-        const res = await fetch('/delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ files: names })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          files = files.filter(f => !data.deleted.includes(f.name));
-          if (activeFile && data.deleted.includes(activeFile.name)) activeFile = null;
-          document.getElementById('file-count').textContent = files.length + ' file' + (files.length !== 1 ? 's' : '');
-          renderList();
-          if (files.length > 0 && !activeFile) selectFile(files[0]);
-          else if (files.length === 0) {
-            document.getElementById('preview-area').innerHTML = '<div id="empty-state"><div class="icon">&#10022;</div><div class="msg">Waiting for artifacts</div></div>';
-          }
-        }
-      } catch(e) { alert('Delete failed: ' + e.message); }
-    }
-
-    function renderList(flashName) {
-      const list = document.getElementById('file-list');
-      list.innerHTML = '';
-      files.forEach(f => {
-        const div = document.createElement('div');
-        const isActive = activeFile && activeFile.name === f.name;
-        div.className = 'file-item' + (isActive ? ' active' : '') + (f.name === flashName ? ' new-flash' : '');
-        const b = badge(f.name);
-        const check = `<input type="checkbox" class="select-check" data-name="${f.name}" onclick="event.stopPropagation()">`;
-        div.innerHTML = `${check}<span class="badge badge-${b}">${b}</span>${f.name}<span class="ts">${timeAgo(f.mtime)}</span>`;
-        div.onclick = () => { if (!selectMode) selectFile(f); };
-        list.appendChild(div);
-      });
-    }
-
-    // ── Preview renderer ───────────────────────────────────────────────
-
-    function selectFile(f) {
-      activeFile = f;
-      cancelEdit();
-      document.getElementById('current-file').textContent = f.name;
-      document.getElementById('open-btn').href = '/files/' + encodeURIComponent(f.name);
-      const editBtn = document.getElementById('edit-btn');
-      editBtn.style.display = EDITABLE.includes(getExt(f.name)) ? 'inline-block' : 'none';
-      const exportWrap = document.getElementById('export-dropdown-wrap');
-      exportWrap.style.display = getExportOptions(getExt(f.name)).length > 0 ? 'inline-block' : 'none';
-      document.getElementById('export-menu').style.display = 'none';
-
-      const area = document.getElementById('preview-area');
-      area.innerHTML = '';
-      const e = getExt(f.name);
-      const url = '/files/' + encodeURIComponent(f.name);
-
-      // ── Visual: iframe ──────────────────────────────────────────────
-      if (['html','htm','svg'].includes(e)) {
-        const frame = document.createElement('iframe');
-        frame.src = url;
-        if (e !== 'svg') frame.sandbox = 'allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups';
-        area.appendChild(frame);
-
-      // ── Images ─────────────────────────────────────────────────────
-      } else if (['png','jpg','jpeg','gif','webp'].includes(e)) {
-        const wrap = document.createElement('div');
-        wrap.id = 'img-preview';
-        const img = document.createElement('img');
-        img.src = url;
-        wrap.appendChild(img);
+        wrap.appendChild(table);
         area.appendChild(wrap);
+      });
 
-      // ── CSV: table ──────────────────────────────────────────────────
-      } else if (e === 'csv') {
-        fetch(url).then(r => r.text()).then(text => {
-          const rows = text.trim().split('\n').map(line => {
-            const cells = []; let cur = '', inQ = false;
-            for (let i = 0; i < line.length; i++) {
-              const c = line[i];
-              if (c === '"') { inQ = !inQ; }
-              else if (c === ',' && !inQ) { cells.push(cur.trim()); cur = ''; }
-              else { cur += c; }
-            }
-            cells.push(cur.trim());
-            return cells;
-          });
-          const wrap = document.createElement('div');
-          wrap.id = 'csv-preview';
-          if (rows.length > 1) wrap.innerHTML = `<div class="row-count">${rows.length - 1} row${rows.length - 1 !== 1 ? 's' : ''}</div>`;
-          const table = document.createElement('table');
-          rows.forEach((row, i) => {
-            const tr = document.createElement('tr');
-            row.forEach(cell => {
-              const td = document.createElement(i === 0 ? 'th' : 'td');
-              td.textContent = cell.replace(/^"|"$/g, '');
-              tr.appendChild(td);
-            });
-            table.appendChild(tr);
-          });
-          wrap.appendChild(table);
-          area.appendChild(wrap);
-        });
+    // Markdown: source | rendered
+    } else if (ext === 'md') {
+      fetch(url).then(r => r.text()).then(text => {
+        const leftEl = makeCodeBlock(text, 'markdown');
+        const rightEl = document.createElement('div');
+        rightEl.className = 'md-rendered';
+        rightEl.innerHTML = marked.parse(text);
+        area.appendChild(makeSplitPane('Source', leftEl, 'Rendered', rightEl, true));
+      });
 
-      // ── Markdown: raw | rendered ────────────────────────────────────
-      } else if (e === 'md') {
-        fetch(url).then(r => r.text()).then(text => {
-          const leftEl = makeCodeBlock(text, 'markdown');
+    // JSON: raw | formatted
+    } else if (ext === 'json') {
+      fetch(url).then(r => r.text()).then(text => {
+        const leftEl = makeCodeBlock(text, 'json');
+        let rightEl;
+        try {
+          const pretty = JSON.stringify(JSON.parse(text), null, 2);
+          rightEl = makeCodeBlock(pretty, 'json');
+        } catch {
+          rightEl = document.createElement('div');
+          rightEl.style.cssText = 'padding:20px;color:var(--danger);font-size:13px';
+          rightEl.textContent = 'Invalid JSON';
+        }
+        area.appendChild(makeSplitPane('Raw', leftEl, 'Formatted', rightEl));
+      });
 
-          const rightEl = document.createElement('div');
-          rightEl.className = 'md-rendered';
-          rightEl.innerHTML = marked.parse(text);
+    // Mermaid: source | diagram
+    } else if (['mermaid','mmd'].includes(ext)) {
+      fetch(url).then(r => r.text()).then(async text => {
+        const leftEl = makeCodeBlock(text, 'plaintext');
+        const rightEl = document.createElement('div');
+        rightEl.style.cssText = 'padding:24px;display:flex;align-items:center;justify-content:center;min-height:100%;background:var(--paper-warm)';
+        try {
+          const { svg } = await mermaid.render('mmd-' + Date.now(), text);
+          rightEl.innerHTML = svg;
+        } catch(err) {
+          rightEl.style.cssText = 'padding:20px;color:var(--danger);font-size:13px';
+          rightEl.textContent = 'Mermaid error: ' + err.message;
+        }
+        area.appendChild(makeSplitPane('Source', leftEl, 'Diagram', rightEl, true));
+      });
 
-          area.appendChild(makeSplitPane('Source', leftEl, 'Rendered', rightEl, true));
-        });
+    // Code: syntax highlighted
+    } else if (['py','js','ts','css','xml','yaml','yml'].includes(ext)) {
+      const langMap = { py:'python', js:'javascript', ts:'typescript', css:'css', xml:'xml', yaml:'yaml', yml:'yaml' };
+      fetch(url).then(r => r.text()).then(text => {
+        area.appendChild(makeCodeBlock(text, langMap[ext] || 'plaintext'));
+      });
 
-      // ── JSON: raw | formatted ───────────────────────────────────────
-      } else if (e === 'json') {
-        fetch(url).then(r => r.text()).then(text => {
-          const leftEl = makeCodeBlock(text, 'json');
+    // Fallback: plain text
+    } else {
+      fetch(url).then(r => r.text()).then(text => {
+        const pre = document.createElement('div');
+        pre.className = 'text-view';
+        pre.textContent = text;
+        area.appendChild(pre);
+      });
+    }
+  }
 
-          let rightEl;
-          try {
-            const pretty = JSON.stringify(JSON.parse(text), null, 2);
-            rightEl = makeCodeBlock(pretty, 'json');
-          } catch {
-            rightEl = document.createElement('div');
-            rightEl.style.cssText = 'padding:20px;color:#ff6b6b;font-size:0.8rem';
-            rightEl.textContent = 'Invalid JSON';
-          }
+  // ── CSV parser ────────────────────────────────────────────────────
 
-          area.appendChild(makeSplitPane('Raw', leftEl, 'Formatted', rightEl));
-        });
+  function parseCSV(text) {
+    return text.trim().split('\n').map(line => {
+      const cells = []; let cur = '', inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') { inQ = !inQ; }
+        else if (c === ',' && !inQ) { cells.push(cur.trim()); cur = ''; }
+        else { cur += c; }
+      }
+      cells.push(cur.trim());
+      return cells;
+    });
+  }
 
-      // ── Mermaid: source | rendered diagram ─────────────────────────
-      } else if (['mermaid','mmd'].includes(e)) {
-        fetch(url).then(r => r.text()).then(async text => {
-          const leftEl = makeCodeBlock(text, 'plaintext');
+  // ── Edit Mode ─────────────────────────────────────────────────────
 
-          const rightEl = document.createElement('div');
-          rightEl.style.cssText = 'padding:24px;display:flex;align-items:center;justify-content:center;min-height:100%;background:#1a1a24';
-          try {
-            const { svg } = await mermaid.render('mmd-' + Date.now(), text);
-            rightEl.innerHTML = svg;
-          } catch(err) {
-            rightEl.style.cssText = 'padding:20px;color:#ff6b6b;font-size:0.8rem';
-            rightEl.textContent = 'Mermaid error: ' + err.message;
-          }
+  function toggleEdit() {
+    if (editMode) {
+      cancelEdit();
+    } else {
+      startEdit();
+    }
+  }
 
-          area.appendChild(makeSplitPane('Source', leftEl, 'Diagram', rightEl, true));
-        });
+  function startEdit() {
+    if (!activeFile) return;
+    const ext = getExt(activeFile.name);
+    const url = '/files/' + encodeURIComponent(activeFile.name);
 
-      // ── Code: syntax highlighted ────────────────────────────────────
-      } else if (['py','js','ts','css','txt','xml','yaml','yml'].includes(e)) {
-        const langMap = { py:'python', js:'javascript', ts:'typescript', css:'css', txt:'plaintext', xml:'xml', yaml:'yaml', yml:'yaml' };
-        fetch(url).then(r => r.text()).then(text => {
-          area.appendChild(makeCodeBlock(text, langMap[e] || 'plaintext'));
-        });
+    fetch(url).then(r => r.text()).then(text => {
+      const ta = document.getElementById('editor-textarea');
+      const right = document.getElementById('editor-right');
+      const wrap = document.getElementById('editor-wrap');
+      ta.value = text;
 
-      // ── Fallback: plain text ────────────────────────────────────────
+      // Determine if live preview is needed
+      livePreviewExt = ['md','json','csv','mermaid','mmd'].includes(ext) ? ext : null;
+
+      if (livePreviewExt) {
+        right.classList.add('visible');
+        document.getElementById('editor-left-label').textContent = 'Edit';
+        updateLivePreview(text);
+        ta.oninput = () => updateLivePreview(ta.value);
+        // Scroll sync
+        const live = document.getElementById('editor-live');
+        ta.onscroll = () => {
+          const maxS = ta.scrollHeight - ta.clientHeight;
+          const pct = maxS > 0 ? ta.scrollTop / maxS : 0;
+          live.scrollTop = pct * (live.scrollHeight - live.clientHeight);
+        };
+        // Make divider draggable
+        const edDiv = document.getElementById('editor-divider');
+        const edBody = document.getElementById('editor-body');
+        const edLeft = document.getElementById('editor-left');
+        edLeft.style.flex = '0 0 50%';
+        makeDraggable(edDiv, edLeft, edBody);
       } else {
-        fetch(url).then(r => r.text()).then(text => {
-          const pre = document.createElement('div');
-          pre.id = 'text-preview';
-          pre.textContent = text;
-          area.appendChild(pre);
-        });
+        right.classList.remove('visible');
+        document.getElementById('editor-left-label').textContent = 'Edit — ' + activeFile.name;
+        ta.oninput = null;
       }
 
-      renderList();
+      wrap.classList.add('visible');
+      editMode = true;
+
+      // Update toolbar
+      const editBtn = document.getElementById('edit-btn');
+      editBtn.classList.add('active');
+      editBtn.textContent = 'Cancel';
+      document.getElementById('save-btn').style.display = '';
+      ta.focus();
+    });
+  }
+
+  function cancelEdit() {
+    const wrap = document.getElementById('editor-wrap');
+    wrap.classList.remove('visible');
+    document.getElementById('editor-right').classList.remove('visible');
+    document.getElementById('editor-textarea').oninput = null;
+    document.getElementById('editor-textarea').onscroll = null;
+    document.getElementById('save-btn').style.display = 'none';
+    const editBtn = document.getElementById('edit-btn');
+    editBtn.classList.remove('active');
+    editBtn.textContent = 'Edit';
+    editMode = false;
+    livePreviewExt = null;
+    document.getElementById('save-status').textContent = '';
+    document.getElementById('save-status').className = 'save-status';
+  }
+
+  function updateLivePreview(text) {
+    const live = document.getElementById('editor-live');
+    if (livePreviewExt === 'md') {
+      live.className = 'editor-live md-rendered';
+      live.style.padding = '28px 32px';
+      live.innerHTML = marked.parse(text);
+    } else if (livePreviewExt === 'json') {
+      live.className = 'editor-live';
+      live.innerHTML = '';
+      live.style.padding = '0';
+      try {
+        const pretty = JSON.stringify(JSON.parse(text), null, 2);
+        const block = makeCodeBlock(pretty, 'json');
+        block.style.height = '100%';
+        live.appendChild(block);
+      } catch {
+        live.style.cssText = 'padding:20px;color:var(--danger);font-size:13px';
+        live.textContent = 'Invalid JSON';
+      }
+    } else if (livePreviewExt === 'csv') {
+      live.className = 'editor-live';
+      live.innerHTML = '';
+      live.style.cssText = 'padding:16px;overflow:auto';
+      const rows = parseCSV(text);
+      if (rows.length <= 1 && !rows[0][0]) {
+        live.innerHTML = '<div style="color:var(--ink-faint);font-size:12px;padding:20px">Table preview will appear as you edit</div>';
+        return;
+      }
+      const table = document.createElement('table');
+      table.style.cssText = 'border-collapse:collapse;font-size:13px;min-width:100%';
+      rows.forEach((row, i) => {
+        const tr = document.createElement('tr');
+        row.forEach(cell => {
+          const td = document.createElement(i === 0 ? 'th' : 'td');
+          td.textContent = cell.replace(/^"|"$/g, '');
+          td.style.cssText = i === 0
+            ? 'background:var(--paper-warm);color:var(--ink);padding:8px 12px;text-align:left;border-bottom:2px solid var(--rule);white-space:nowrap;font-weight:600;font-size:12px'
+            : 'padding:7px 12px;border-bottom:1px solid var(--rule);color:var(--ink-soft);white-space:nowrap';
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+      live.appendChild(table);
+    } else if (['mermaid','mmd'].includes(livePreviewExt)) {
+      live.className = 'editor-live';
+      live.innerHTML = '';
+      live.style.cssText = 'padding:24px;display:flex;align-items:center;justify-content:center;min-height:100%;background:var(--paper-warm)';
+      try {
+        const id = 'mmd-live-' + Date.now();
+        mermaid.render(id, text).then(({ svg }) => { live.innerHTML = svg; })
+          .catch(err => { live.style.cssText = 'padding:20px;color:var(--danger);font-size:13px'; live.textContent = 'Mermaid error: ' + err.message; });
+      } catch(err) {
+        live.style.cssText = 'padding:20px;color:var(--danger);font-size:13px';
+        live.textContent = 'Mermaid error: ' + err.message;
+      }
     }
+  }
 
-    // ── SSE ────────────────────────────────────────────────────────────
+  // ── Save ──────────────────────────────────────────────────────────
 
-    function connect() {
-      const es = new EventSource('/events');
-      es.onopen = () => { dot.className = 'connected'; connStatus.textContent = 'Connected'; };
-      es.onmessage = e => {
-        const data = JSON.parse(e.data);
-        const fname = data.file;
-        dot.className = 'flash';
-        setTimeout(() => dot.className = 'connected', 400);
-        const existing = files.findIndex(f => f.name === fname);
-        const entry = { name: fname, mtime: Date.now() };
-        if (existing >= 0) files[existing] = entry;
-        else files.unshift(entry);
-        document.getElementById('file-count').textContent = files.length + ' file' + (files.length !== 1 ? 's' : '');
-        renderList(fname);
-        selectFile(entry);
-      };
-      es.onerror = () => {
-        dot.className = '';
-        connStatus.textContent = 'Server disconnected';
-        es.close();
-        setTimeout(() => {
-          fetch('/list').then(r => { if (r.ok) connect(); else showServerDown(); })
-                       .catch(() => showServerDown());
-        }, 3000);
-      };
+  async function saveEdit() {
+    if (!activeFile) return;
+    const content = document.getElementById('editor-textarea').value;
+    const status = document.getElementById('save-status');
+    status.textContent = 'Saving...';
+    status.className = 'save-status';
+    try {
+      const res = await fetch('/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: activeFile.name, content })
+      });
+      if (res.ok) {
+        status.textContent = 'Saved';
+        status.className = 'save-status success';
+        setTimeout(() => { status.textContent = ''; status.className = 'save-status'; }, 2000);
+        cancelEdit();
+        renderPreview(activeFile);
+      } else {
+        status.textContent = 'Save failed (' + res.status + ')';
+        status.className = 'save-status error';
+      }
+    } catch(e) {
+      status.textContent = 'Error: ' + e.message;
+      status.className = 'save-status error';
     }
+  }
 
-    function showServerDown() {
-      dot.className = '';
-      connStatus.textContent = 'Server is down';
-      document.getElementById('preview-area').innerHTML = `
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;padding:40px;text-align:center">
-          <div style="font-size:2.5rem;opacity:0.3">&#9888;</div>
-          <div style="color:#ff6b6b;font-size:1rem;font-weight:600">Gallery server is not running</div>
-          <div style="color:#888;font-size:0.8rem;line-height:1.8;max-width:400px">
-            To restart, either:<br>
-            &#8226; Double-click <strong>Start Gallery</strong> on your Desktop<br>
-            &#8226; Or ask Claude Code: <code style="background:#1e1e2a;padding:2px 6px;border-radius:3px;color:#00ffcc">start the gallery</code>
-          </div>
-          <button onclick="location.reload()" style="margin-top:12px;background:#1e1e2a;border:1px solid #2a2a3a;color:#aaa;padding:8px 20px;border-radius:4px;cursor:pointer;font-size:0.75rem">Retry</button>
-        </div>`;
+  // ── Save As ───────────────────────────────────────────────────────
+
+  async function saveAs() {
+    if (!activeFile) return;
+    const url = '/files/' + encodeURIComponent(activeFile.name);
+    const res = await fetch(url);
+    const blob = await res.blob();
+
+    if (window.showSaveFilePicker) {
+      const ext = getExt(activeFile.name);
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: activeFile.name,
+          types: ext ? [{ description: ext.toUpperCase() + ' file', accept: { [blob.type || 'application/octet-stream']: ['.' + ext] } }] : []
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      } catch(e) {
+        if (e.name !== 'AbortError') alert('Save failed: ' + e.message);
+        return;
+      }
+    } else {
+      downloadBlob(blob, activeFile.name);
     }
+    const status = document.getElementById('save-status');
+    status.textContent = 'Saved to disk';
+    status.className = 'save-status success';
+    setTimeout(() => { status.textContent = ''; status.className = 'save-status'; }, 2000);
+  }
 
-    loadList().catch(() => showServerDown());
-    connect();
-  </script>
+  // ── Export ────────────────────────────────────────────────────────
+
+  function getExportOptions(ext) {
+    if (ext === 'md') return [
+      { label: 'HTML document (.html)', action: exportMdToHtml },
+      { label: 'PDF (via print)', action: exportMdToPdf },
+      { label: 'Word-compatible (.doc)', action: exportMdToDoc },
+    ];
+    if (['html','htm'].includes(ext)) return [
+      { label: 'PDF (via print)', action: exportHtmlToPdf },
+      { label: 'Screenshot (.png)', action: exportHtmlToPng },
+    ];
+    if (['mermaid','mmd'].includes(ext)) return [
+      { label: 'SVG image (.svg)', action: exportMermaidToSvg },
+      { label: 'PNG image (.png)', action: exportMermaidToPng },
+    ];
+    return [];
+  }
+
+  function toggleExportMenu() {
+    const menu = document.getElementById('export-menu');
+    if (menu.classList.contains('visible')) { menu.classList.remove('visible'); return; }
+    if (!activeFile) return;
+    const options = getExportOptions(getExt(activeFile.name));
+    if (!options.length) return;
+    menu.innerHTML = '';
+    options.forEach(opt => {
+      const item = document.createElement('div');
+      item.className = 'export-item';
+      item.textContent = opt.label;
+      item.onclick = () => { menu.classList.remove('visible'); opt.action(); };
+      menu.appendChild(item);
+    });
+    menu.classList.add('visible');
+  }
+
+  // Close export menu on outside click
+  document.addEventListener('click', e => {
+    const wrap = document.getElementById('export-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      document.getElementById('export-menu').classList.remove('visible');
+    }
+  });
+
+  async function exportMdToHtml() {
+    const text = await (await fetch('/files/' + encodeURIComponent(activeFile.name))).text();
+    const rendered = marked.parse(text);
+    const title = activeFile.name.replace(/\.md$/i, '');
+    const html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<title>' + title + '</title>\n<style>\n  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #333; }\n  pre { background: #f5f5f5; padding: 14px; border-radius: 5px; overflow-x: auto; }\n  code { background: #f0f0f0; padding: 2px 5px; border-radius: 3px; font-size: 0.9em; }\n  pre code { background: none; padding: 0; }\n  blockquote { border-left: 3px solid #ddd; margin: 1em 0; padding: 0.5em 1em; color: #666; }\n  table { border-collapse: collapse; width: 100%; margin: 1em 0; }\n  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }\n  th { background: #f5f5f5; }\n  img { max-width: 100%; }\n</style>\n</head>\n<body>\n' + rendered + '\n</body>\n</html>';
+    downloadBlob(new Blob([html], { type: 'text/html' }), title + '.html');
+  }
+
+  async function exportMdToPdf() {
+    const text = await (await fetch('/files/' + encodeURIComponent(activeFile.name))).text();
+    const rendered = marked.parse(text);
+    const w = window.open('', '_blank');
+    w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + activeFile.name + '</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.7;color:#333}pre{background:#f5f5f5;padding:14px;border-radius:5px;overflow-x:auto}code{background:#f0f0f0;padding:2px 5px;border-radius:3px}pre code{background:none;padding:0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px 12px}th{background:#f5f5f5}</style></head><body>' + rendered + '</body></html>');
+    w.document.close();
+    setTimeout(() => w.print(), 500);
+  }
+
+  async function exportMdToDoc() {
+    const text = await (await fetch('/files/' + encodeURIComponent(activeFile.name))).text();
+    const rendered = marked.parse(text);
+    const doc = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><title>' + activeFile.name + '</title><!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]--><style>body{font-family:Calibri,sans-serif;line-height:1.6}table{border-collapse:collapse}th,td{border:1px solid #999;padding:6px 10px}</style></head><body>' + rendered + '</body></html>';
+    downloadBlob(new Blob([doc], { type: 'application/msword' }), activeFile.name.replace(/\.md$/i, '.doc'));
+  }
+
+  function exportHtmlToPdf() {
+    const w = window.open('/files/' + encodeURIComponent(activeFile.name), '_blank');
+    setTimeout(() => w.print(), 1000);
+  }
+
+  async function exportHtmlToPng() {
+    const iframe = document.querySelector('#detail-preview iframe');
+    if (!iframe) { alert('No preview found'); return; }
+    try {
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      const canvas = await html2canvas(iframeDoc.body, { backgroundColor: '#ffffff', scale: 2, useCORS: true });
+      canvas.toBlob(blob => {
+        downloadBlob(blob, activeFile.name.replace(/\.(html|htm)$/i, '.png'));
+      }, 'image/png');
+    } catch(e) {
+      alert('Screenshot failed: ' + e.message + '\n\nTip: Try "Open in tab" and use your OS screenshot tool instead.');
+    }
+  }
+
+  function exportMermaidToSvg() {
+    const svgEl = document.querySelector('#detail-preview .split-half:last-child svg') ||
+                  document.querySelector('#editor-live svg');
+    if (!svgEl) { alert('No rendered diagram found.'); return; }
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    downloadBlob(new Blob([svgData], { type: 'image/svg+xml' }), activeFile.name.replace(/\.(mermaid|mmd)$/i, '.svg'));
+  }
+
+  async function exportMermaidToPng() {
+    const svgEl = document.querySelector('#detail-preview .split-half:last-child svg') ||
+                  document.querySelector('#editor-live svg');
+    if (!svgEl) { alert('No rendered diagram found.'); return; }
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const svgUrl = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const scale = 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth * scale;
+      canvas.height = img.naturalHeight * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(svgUrl);
+      canvas.toBlob(blob => {
+        downloadBlob(blob, activeFile.name.replace(/\.(mermaid|mmd)$/i, '.png'));
+      }, 'image/png');
+    };
+    img.onerror = () => { URL.revokeObjectURL(svgUrl); alert('Failed to rasterize SVG to PNG.'); };
+    img.src = svgUrl;
+  }
+
+  // ── SSE (live updates) ────────────────────────────────────────────
+
+  function connect() {
+    const es = new EventSource('/events');
+    es.onmessage = e => {
+      const data = JSON.parse(e.data);
+      const fname = data.file;
+      const existing = files.findIndex(f => f.name === fname);
+      const entry = { name: fname, mtime: Date.now() };
+      if (existing >= 0) files[existing] = entry;
+      else files.unshift(entry);
+      document.getElementById('file-count').textContent = files.length + ' artifact' + (files.length !== 1 ? 's' : '');
+      const q = document.getElementById('search').value.trim();
+      if (!q) filtered = [...files];
+      else filtered = files.filter(f => fuzzyMatch(q, f.name));
+      if (!document.getElementById('homepage').classList.contains('hidden')) {
+        renderGrid();
+      }
+      // Update sidebar if in detail view
+      if (activeFile) {
+        renderSidebar();
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      setTimeout(() => {
+        fetch('/list').then(r => { if (r.ok) connect(); else showServerDown(); })
+                     .catch(() => showServerDown());
+      }, 3000);
+    };
+  }
+
+  function showServerDown() {
+    const grid = document.getElementById('grid');
+    grid.innerHTML = '<div class="empty-state"><div class="server-down"><div class="icon">&#9888;</div><div class="title">Gallery server is not running</div><div class="desc">To restart, either:<br>&#8226; Double-click <strong>Start Gallery</strong> on your Desktop<br>&#8226; Or ask Claude Code: <code style="background:var(--code-bg);padding:2px 6px;border-radius:3px;color:var(--accent);font-family:var(--mono);font-size:12px">start the gallery</code></div><button onclick="location.reload()">Retry</button></div></div>';
+  }
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (editMode) { cancelEdit(); return; }
+      if (activeFile) { goHome(); return; }
+    }
+    if ((e.key === '/' || (e.ctrlKey && e.key === 'k')) && !activeFile) {
+      e.preventDefault();
+      document.getElementById('search').focus();
+    }
+    // Ctrl+S to save in edit mode
+    if (e.ctrlKey && e.key === 's' && editMode) {
+      e.preventDefault();
+      saveEdit();
+    }
+  });
+
+  // ── Init ──────────────────────────────────────────────────────────
+
+  loadFiles();
+  connect();
+</script>
+<!-- そうしろと囁くのよ、私のゴーストが -->
 </body>
 </html>
