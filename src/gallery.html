@@ -906,7 +906,7 @@
         const iframe = document.createElement('iframe');
         iframe.src = '/files/' + encodeURIComponent(f.name);
         iframe.loading = 'lazy';
-        if (ext !== 'svg') iframe.sandbox = 'allow-scripts allow-same-origin';
+        iframe.sandbox = '';
         preview.appendChild(iframe);
       } else if (['png','jpg','jpeg','gif','webp'].includes(ext)) {
         const img = document.createElement('img');
@@ -930,6 +930,68 @@
       card.appendChild(info);
       grid.appendChild(card);
     });
+  }
+
+  // ── Thumbnail generation ──────────────────────────────────────────
+
+  const thumbQueue = [];
+  let thumbProcessing = false;
+
+  function generateThumb(fname, previewEl) {
+    const observer = new IntersectionObserver((entries, obs) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          obs.disconnect();
+          thumbQueue.push({ fname, previewEl });
+          processThumbQueue();
+        }
+      });
+    }, { threshold: 0.1 });
+    observer.observe(previewEl);
+  }
+
+  function processThumbQueue() {
+    if (thumbProcessing || thumbQueue.length === 0) return;
+    thumbProcessing = true;
+    const { fname, previewEl } = thumbQueue.shift();
+
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;height:600px;overflow:hidden';
+    document.body.appendChild(container);
+
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'width:800px;height:600px;border:none';
+    iframe.sandbox = 'allow-same-origin';
+    iframe.src = '/files/' + encodeURIComponent(fname);
+    container.appendChild(iframe);
+
+    iframe.onload = () => {
+      setTimeout(async () => {
+        try {
+          const doc = iframe.contentDocument || iframe.contentWindow.document;
+          const canvas = await html2canvas(doc.body, { width: 800, height: 600, scale: 0.5, backgroundColor: '#ffffff', logging: false });
+          const dataUrl = canvas.toDataURL('image/png');
+          await fetch('/thumb', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file: fname, data: dataUrl })
+          });
+          const img = document.createElement('img');
+          img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+          img.src = dataUrl;
+          previewEl.innerHTML = '';
+          previewEl.appendChild(img);
+        } catch(e) {}
+        container.remove();
+        thumbProcessing = false;
+        processThumbQueue();
+      }, 500);
+    };
+    iframe.onerror = () => {
+      container.remove();
+      thumbProcessing = false;
+      processThumbQueue();
+    };
   }
 
   // ── Search ────────────────────────────────────────────────────────

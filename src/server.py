@@ -6,22 +6,13 @@ Port 7477. Zero polling — browser only updates when /notify is called.
 Artifact ordering is tracked in artifacts.json (insertion order, newest first).
 Files not in the index fall back to mtime and are added on next /notify call.
 """
-import http.server, json, os, queue, sys, threading, urllib.parse
+import http.server, json, os, queue, threading, urllib.parse
 from pathlib import Path
 
 PORT = 7477
-if getattr(sys, 'frozen', False):
-    if sys.platform == 'win32':
-        _docs = Path(os.environ.get('USERPROFILE', Path.home())) / 'Documents'
-        _base = _docs / 'ClaudeGallery'
-    else:
-        _base = Path.home() / 'ClaudeGallery'
-    ROOT = _base / 'artifacts'
-    GALLERY_HTML = _base / 'gallery.html'
-else:
-    ROOT = Path(__file__).parent
-    GALLERY_HTML = ROOT / 'gallery.html'
-SKIP = {'gallery.html', 'server.py', 'artifacts.json'}
+ROOT = Path(__file__).parent
+THUMB_DIR = ROOT / '.thumbnails'
+SKIP = {'gallery.html', 'server.py', 'artifacts.json', '.thumbnails'}
 INDEX_FILE = ROOT / 'artifacts.json'
 
 _clients: list[queue.Queue] = []
@@ -127,12 +118,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     order = load_index()
                     order = [n for n in order if n not in deleted]
                     save_index(order)
-                resp = json.dumps({'deleted': deleted}, ensure_ascii=False).encode('utf-8')
+                resp = json.dumps({'deleted': deleted}).encode()
                 self.send_response(200)
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', len(resp))
                 self.end_headers()
                 self.wfile.write(resp)
+            except Exception as e:
+                self.send_error(500, str(e))
+
+        elif path == '/thumb':
+            try:
+                import base64
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length))
+                fname = body.get('file', '')
+                data_url = body.get('data', '')
+                if not fname or not data_url:
+                    self.send_error(400); return
+                THUMB_DIR.mkdir(exist_ok=True)
+                png_data = base64.b64decode(data_url.split(',', 1)[1])
+                (THUMB_DIR / (fname + '.png')).write_bytes(png_data)
+                self._empty_ok()
             except Exception as e:
                 self.send_error(500, str(e))
 
@@ -145,7 +152,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(parsed.query)
 
         if path in ('/', '/gallery.html'):
-            self.serve_file(GALLERY_HTML, 'text/html')
+            self.serve_file(ROOT / 'gallery.html', 'text/html')
 
         elif path == '/notify':
             fname = qs.get('file', [None])[0]
@@ -171,7 +178,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if fname == '__ping__':
                         self.wfile.write(b': ping\n\n')
                     else:
-                        msg = f'data: {json.dumps({"file": fname}, ensure_ascii=False)}\n\n'
+                        msg = f'data: {json.dumps({"file": fname})}\n\n'
                         self.wfile.write(msg.encode())
                     self.wfile.flush()
             except Exception:
@@ -183,13 +190,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif path == '/list':
             files = ordered_files()
-            body = json.dumps({'files': files}, ensure_ascii=False).encode('utf-8')
+            body = json.dumps({'files': files}).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', len(body))
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(body)
+
+        elif path.startswith('/thumb/'):
+            name = path[7:]
+            fpath = THUMB_DIR / name
+            if fpath.is_file():
+                self.serve_file(fpath, 'image/png')
+            else:
+                self.send_error(404)
 
         elif path.startswith('/files/'):
             name = path[7:]
@@ -258,18 +273,14 @@ def guess_mime(name: str) -> str:
 
 
 if __name__ == '__main__':
-    if sys.platform == 'win32' and sys.stdout is not None:
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    if sys.platform == 'win32' and sys.stderr is not None:
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
     ROOT.mkdir(parents=True, exist_ok=True)
-    GALLERY_HTML.parent.mkdir(parents=True, exist_ok=True)
     os.chdir(ROOT)
     threading.Thread(target=heartbeat, daemon=True).start()
+    print(f'Claude Gallery → http://localhost:{PORT}', flush=True)
     try:
         with http.server.ThreadingHTTPServer(('127.0.0.1', PORT), Handler) as srv:
             srv.serve_forever()
     except OSError as e:
-        if sys.stderr is not None:
-            print(f'Failed to start: {e}', file=sys.stderr)
+        import sys
+        print(f'Failed to start: {e}', file=sys.stderr)
         sys.exit(1)
