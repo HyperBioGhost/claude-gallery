@@ -47,10 +47,10 @@ Write-Host ""
 # ── 2. GET / returns 200 and contains expected content ────────────────
 try {
     $r = Invoke-WebRequest -Uri $base -UseBasicParsing -TimeoutSec 5
-    if ($r.StatusCode -eq 200 -and $r.Content -match "Artifact Gallery") {
+    if ($r.StatusCode -eq 200 -and $r.Content -match "Claude Gallery") {
         Pass "GET / returns 200 with gallery HTML"
     } else {
-        Fail "GET / returns 200 with gallery HTML" "status=$($r.StatusCode), body missing 'Artifact Gallery'"
+        Fail "GET / returns 200 with gallery HTML" "status=$($r.StatusCode), body missing 'Claude Gallery'"
     }
 } catch { Fail "GET / returns 200 with gallery HTML" $_.Exception.Message }
 
