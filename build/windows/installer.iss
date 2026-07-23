@@ -24,8 +24,7 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
-CloseApplications=force
-CloseApplicationsFilter=*.exe
+CloseApplications=no
 UninstallDisplayIcon={app}\{#AppExeName}
 SetupIconFile=..\..\assets\icon.ico
 
@@ -66,3 +65,12 @@ Filename: "{app}\{#AppExeName}"; Flags: nowait runhidden skipifsilent
 Filename: "taskkill"; Parameters: "/F /IM {#AppExeName}"; Flags: runhidden
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\remove-claude.ps1"""; Flags: runhidden waituntilterminated
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\unregister-task.ps1"""; Flags: runhidden waituntilterminated
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill', '/F /IM claude-gallery-server.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+end;
