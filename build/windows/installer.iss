@@ -24,6 +24,8 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
+CloseApplications=force
+CloseApplicationsFilter=*.exe
 UninstallDisplayIcon={app}\{#AppExeName}
 SetupIconFile=..\..\assets\icon.ico
 
