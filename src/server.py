@@ -153,6 +153,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_error(500, str(e))
 
+        elif path == '/import':
+            try:
+                import base64
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length))
+                imported = []
+                for item in body.get('files', []):
+                    raw_name = item.get('name', '')
+                    data_url = item.get('data', '')
+                    # Reject anything with path separators rather than silently
+                    # rewriting it, so a caller can't smuggle in a directory.
+                    if ('/' in raw_name or '\\' in raw_name
+                            or raw_name in ('.', '..')):
+                        continue
+                    fname = os.path.basename(raw_name)
+                    if not fname or not data_url or fname in SKIP:
+                        continue
+                    fpath = (ROOT / fname).resolve()
+                    if not fpath.is_relative_to(ROOT.resolve()):
+                        continue
+                    # Avoid overwrite: append -1, -2 etc if the name is taken
+                    if fpath.exists():
+                        stem, dot, ext = fname.rpartition('.')
+                        n = 1
+                        while fpath.exists():
+                            newname = f'{stem}-{n}{dot}{ext}' if dot else f'{fname}-{n}'
+                            fpath = (ROOT / newname).resolve()
+                            n += 1
+                        fname = fpath.name
+                    fpath.write_bytes(base64.b64decode(data_url.split(',', 1)[1]))
+                    register_file(fname)
+                    imported.append(fname)
+                with _clients_lock:
+                    for f in imported:
+                        for q in _clients:
+                            q.put(f)
+                resp = json.dumps({'imported': imported}, ensure_ascii=False).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Content-Length', len(resp))
+                self.end_headers()
+                self.wfile.write(resp)
+            except Exception as e:
+                self.send_error(500, str(e))
+
         else:
             self.send_error(404)
 

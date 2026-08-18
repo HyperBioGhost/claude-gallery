@@ -262,6 +262,48 @@
   .home-action-btn.danger { border-color: var(--danger); color: var(--danger); }
   .home-action-btn.danger:hover { background: var(--danger); color: white; }
 
+  /* Drop overlay */
+  #drop-overlay {
+    position: fixed;
+    inset: 0;
+    background: oklch(98.5% 0.005 90 / 0.95);
+    backdrop-filter: blur(4px);
+    z-index: 999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  #drop-overlay.visible { display: flex; }
+  #drop-overlay .drop-box {
+    border: 2px dashed var(--accent);
+    border-radius: 16px;
+    padding: 64px 96px;
+    text-align: center;
+    background: white;
+    box-shadow: var(--card-shadow-hover);
+  }
+  #drop-overlay .drop-icon {
+    font-size: 2.5rem;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  #drop-overlay .drop-title {
+    font-family: var(--serif);
+    font-size: 28px;
+    color: var(--ink);
+    margin-bottom: 8px;
+  }
+  #drop-overlay .drop-sub {
+    font-size: 14px;
+    color: var(--ink-faint);
+  }
+  #import-status {
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin-left: 4px;
+  }
+
   /* Empty state */
   .empty-state {
     grid-column: 1 / -1;
@@ -647,8 +689,11 @@
       <span class="search-count" id="search-count"></span>
     </div>
     <div class="home-actions">
+      <button class="home-action-btn" id="import-btn" onclick="document.getElementById('import-input').click()">Import files</button>
+      <input type="file" id="import-input" multiple style="display:none" onchange="handleImportInput(event)">
       <button class="home-action-btn" id="select-mode-btn" onclick="toggleSelectMode()">Select</button>
       <button class="home-action-btn danger" id="delete-selected-btn" onclick="deleteSelected()" style="display:none">Delete Selected</button>
+      <span id="import-status"></span>
     </div>
   </div>
   <div class="grid-wrap">
@@ -694,6 +739,14 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<div id="drop-overlay">
+  <div class="drop-box">
+    <div class="drop-icon">&#8681;</div>
+    <div class="drop-title">Drop to import</div>
+    <div class="drop-sub">Files will be added to your gallery</div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
@@ -703,6 +756,72 @@
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1/dist/html2canvas.min.js"></script>
 <script>
   mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+  // ── Import (drag-drop + file picker) ─────────────────────────────
+
+  function readFileAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve({ name: file.name, data: r.result });
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  async function importFiles(fileList) {
+    const arr = Array.from(fileList);
+    if (!arr.length) return;
+    const status = document.getElementById('import-status');
+    status.textContent = 'Importing ' + arr.length + ' file' + (arr.length > 1 ? 's' : '') + '...';
+    try {
+      const payload = await Promise.all(arr.map(readFileAsDataURL));
+      const res = await fetch('/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: payload })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      status.textContent = data.imported.length + ' imported';
+      status.style.color = 'var(--success)';
+      setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 2500);
+      await loadFiles();
+    } catch (e) {
+      status.textContent = 'Import failed: ' + e.message;
+      status.style.color = 'var(--danger)';
+      setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 4000);
+    }
+  }
+
+  function handleImportInput(e) {
+    importFiles(e.target.files);
+    e.target.value = '';
+  }
+
+  let dragDepth = 0;
+  const dropOverlay = () => document.getElementById('drop-overlay');
+
+  window.addEventListener('dragenter', e => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    dragDepth++;
+    dropOverlay().classList.add('visible');
+  });
+  window.addEventListener('dragover', e => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+  });
+  window.addEventListener('dragleave', e => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dropOverlay().classList.remove('visible');
+  });
+  window.addEventListener('drop', e => {
+    if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    dragDepth = 0;
+    dropOverlay().classList.remove('visible');
+    importFiles(e.dataTransfer.files);
+  });
 
   let files = [], filtered = [], activeFile = null;
   let selectMode = false;
@@ -867,69 +986,130 @@
       renderGrid();
       document.getElementById('file-count').textContent = files.length + ' artifact' + (files.length !== 1 ? 's' : '');
     } catch {
+      cardCache.clear();
       document.getElementById('grid').innerHTML = '<div class="empty-state"><div class="icon">&#9888;</div><div class="msg">Gallery server is not running</div></div>';
     }
   }
 
+  // Card cache: filename -> { el, mtime }. Cards are built once and reused
+  // so iframes/images don't reload on every re-render (search, back-nav, SSE).
+  const cardCache = new Map();
+
+  function buildCard(f) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.onclick = () => {
+      if (!selectMode) openDetail(f);
+    };
+
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.className = 'select-check';
+    check.dataset.name = f.name;
+    check.onclick = (e) => e.stopPropagation();
+    card.appendChild(check);
+
+    const ext = getExt(f.name);
+    const type = getType(f.name);
+    const preview = document.createElement('div');
+    preview.className = 'card-preview';
+
+    if (['html','htm','svg'].includes(ext)) {
+      const iframe = document.createElement('iframe');
+      iframe.src = '/files/' + encodeURIComponent(f.name);
+      iframe.loading = 'lazy';
+      iframe.sandbox = '';
+      preview.appendChild(iframe);
+    } else if (['png','jpg','jpeg','gif','webp'].includes(ext)) {
+      const img = document.createElement('img');
+      img.src = '/files/' + encodeURIComponent(f.name);
+      img.loading = 'lazy';
+      preview.appendChild(img);
+    } else {
+      preview.innerHTML = '<div class="card-icon"><span class="type-badge type-' + type + '">.' + ext + '</span></div>';
+    }
+
+    const info = document.createElement('div');
+    info.className = 'card-info';
+    info.innerHTML =
+      '<div class="card-name" title="' + f.name + '">' + f.name + '</div>' +
+      '<div class="card-meta">' +
+        '<span class="card-time">' + timeAgo(f.mtime) + '</span>' +
+        '<span class="badge type-' + type + '">' + type + '</span>' +
+      '</div>';
+
+    card.appendChild(preview);
+    card.appendChild(info);
+    return card;
+  }
+
+  function getCard(f) {
+    const cached = cardCache.get(f.name);
+    // Reuse the existing node unless the file actually changed on disk
+    if (cached && cached.mtime === f.mtime) {
+      const t = cached.el.querySelector('.card-time');
+      if (t) t.textContent = timeAgo(f.mtime);
+      cached.el.onclick = () => { if (!selectMode) openDetail(f); };
+      return cached.el;
+    }
+    const el = buildCard(f);
+    // Swap in place so only this one card's preview reloads
+    if (cached && cached.el.parentNode) {
+      el.style.order = cached.el.style.order;
+      el.style.display = cached.el.style.display;
+      cached.el.parentNode.replaceChild(el, cached.el);
+    }
+    cardCache.set(f.name, { el, mtime: f.mtime });
+    return el;
+  }
+
   function renderGrid() {
     const grid = document.getElementById('grid');
-    grid.innerHTML = '';
-    if (filtered.length === 0) {
-      grid.innerHTML = '<div class="empty-state"><div class="icon">&#8709;</div><div class="msg">No artifacts match your search</div></div>';
-      document.getElementById('search-count').textContent = '';
-      return;
-    }
     const q = document.getElementById('search').value;
     document.getElementById('search-count').textContent = q ? filtered.length + ' found' : '';
 
-    filtered.forEach(f => {
-      const card = document.createElement('div');
-      card.className = 'card';
-      card.onclick = () => {
-        if (!selectMode) openDetail(f);
-      };
+    // Empty-state node lives alongside the cards; never wipe the grid, because
+    // detaching/reinserting an <iframe> forces the browser to reload it.
+    let empty = document.getElementById('grid-empty');
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.id = 'grid-empty';
+      empty.className = 'empty-state';
+      empty.innerHTML = '<div class="icon">&#8709;</div><div class="msg">No artifacts match your search</div>';
+      grid.appendChild(empty);
+    }
+    empty.style.display = filtered.length === 0 ? '' : 'none';
 
-      // Select checkbox
-      const check = document.createElement('input');
-      check.type = 'checkbox';
-      check.className = 'select-check';
-      check.dataset.name = f.name;
-      check.onclick = (e) => e.stopPropagation();
-      card.appendChild(check);
-
-      const ext = getExt(f.name);
-      const type = getType(f.name);
-      const preview = document.createElement('div');
-      preview.className = 'card-preview';
-
-      if (['html','htm','svg'].includes(ext)) {
-        const iframe = document.createElement('iframe');
-        iframe.src = '/files/' + encodeURIComponent(f.name);
-        iframe.loading = 'lazy';
-        iframe.sandbox = '';
-        preview.appendChild(iframe);
-      } else if (['png','jpg','jpeg','gif','webp'].includes(ext)) {
-        const img = document.createElement('img');
-        img.src = '/files/' + encodeURIComponent(f.name);
-        img.loading = 'lazy';
-        preview.appendChild(img);
-      } else {
-        preview.innerHTML = '<div class="card-icon"><span class="type-badge type-' + type + '">.' + ext + '</span></div>';
-      }
-
-      const info = document.createElement('div');
-      info.className = 'card-info';
-      info.innerHTML =
-        '<div class="card-name" title="' + f.name + '">' + f.name + '</div>' +
-        '<div class="card-meta">' +
-          '<span>' + timeAgo(f.mtime) + '</span>' +
-          '<span class="badge type-' + type + '">' + type + '</span>' +
-        '</div>';
-
-      card.appendChild(preview);
-      card.appendChild(info);
-      grid.appendChild(card);
+    // Ensure every known file has a card, appended once and never moved.
+    files.forEach(f => {
+      const el = getCard(f);
+      if (el.parentNode !== grid) grid.appendChild(el);
     });
+
+    // Filter + order purely via CSS so no DOM nodes are relocated.
+    const rank = new Map(filtered.map((f, i) => [f.name, i]));
+    cardCache.forEach(({ el }, name) => {
+      if (rank.has(name)) {
+        el.style.display = '';
+        el.style.order = rank.get(name);
+      } else {
+        el.style.display = 'none';
+      }
+    });
+
+    // Drop cards for files that no longer exist
+    const live = new Set(files.map(f => f.name));
+    for (const [name, { el }] of Array.from(cardCache.entries())) {
+      if (!live.has(name)) {
+        el.remove();
+        cardCache.delete(name);
+      }
+    }
+  }
+
+  // Force a fresh reload of one card's preview (called after edit/save)
+  function invalidateCard(fname) {
+    cardCache.delete(fname);
   }
 
   // ── Thumbnail generation ──────────────────────────────────────────
@@ -1368,6 +1548,7 @@
         setTimeout(() => { status.textContent = ''; status.className = 'save-status'; }, 2000);
         cancelEdit();
         renderPreview(activeFile);
+        invalidateCard(activeFile.name);
       } else {
         status.textContent = 'Save failed (' + res.status + ')';
         status.className = 'save-status error';
@@ -1563,7 +1744,8 @@
 
   function showServerDown() {
     const grid = document.getElementById('grid');
-    grid.innerHTML = '<div class="empty-state"><div class="server-down"><div class="icon">&#9888;</div><div class="title">Gallery server is not running</div><div class="desc">To restart, either:<br>&#8226; Double-click <strong>Start Gallery</strong> on your Desktop<br>&#8226; Or ask Claude Code: <code style="background:var(--code-bg);padding:2px 6px;border-radius:3px;color:var(--accent);font-family:var(--mono);font-size:12px">start the gallery</code></div><button onclick="location.reload()">Retry</button></div></div>';
+    cardCache.clear();
+    grid.innerHTML ='<div class="empty-state"><div class="server-down"><div class="icon">&#9888;</div><div class="title">Gallery server is not running</div><div class="desc">To restart, either:<br>&#8226; Double-click <strong>Start Gallery</strong> on your Desktop<br>&#8226; Or ask Claude Code: <code style="background:var(--code-bg);padding:2px 6px;border-radius:3px;color:var(--accent);font-family:var(--mono);font-size:12px">start the gallery</code></div><button onclick="location.reload()">Retry</button></div></div>';
   }
 
   // ── Keyboard shortcuts ────────────────────────────────────────────
