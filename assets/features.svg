@@ -34,7 +34,7 @@
   <text x="232" y="200" fill="#71757F" font-size="10" font-family="ui-monospace,Consolas,monospace">.html .htm</text>
   <text x="420" y="200" fill="#474B57" font-size="11">Fully rendered in a sandboxed iframe</text>
   <path d="M 667.4 194.8 L 670.7 198.3 L 676.9 191.3" fill="none" stroke="#DE5340" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="754" y="199.0" text-anchor="middle" fill="#C4BFB6" font-size="12">—</text>
+  <path d="M 749.4 194.8 L 752.7 198.3 L 758.9 191.3" fill="none" stroke="#DE5340" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   <text x="846" y="200" text-anchor="middle" fill="#474B57" font-size="9.5" letter-spacing="0.2">PDF, PNG</text>
 
   <!-- Vector image -->
@@ -45,7 +45,7 @@
   <text x="232" y="234" fill="#71757F" font-size="10" font-family="ui-monospace,Consolas,monospace">.svg</text>
   <text x="420" y="234" fill="#474B57" font-size="11">Rendered vector image</text>
   <path d="M 667.4 228.8 L 670.7 232.3 L 676.9 225.3" fill="none" stroke="#DE5340" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="754" y="233.0" text-anchor="middle" fill="#C4BFB6" font-size="12">—</text>
+  <path d="M 749.4 228.8 L 752.7 232.3 L 758.9 225.3" fill="none" stroke="#DE5340" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   <text x="846" y="233.0" text-anchor="middle" fill="#C4BFB6" font-size="12">—</text>
 
   <!-- Images -->

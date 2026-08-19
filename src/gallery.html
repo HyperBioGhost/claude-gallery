@@ -507,6 +507,19 @@
     flex: 1;
     overflow: auto;
   }
+  /* Document-rendered previews: the iframe owns its own scrollbar */
+  .editor-live.editor-live-frame {
+    overflow: hidden;
+    padding: 0;
+    background: white;
+  }
+  .editor-live-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+    background: white;
+  }
   .editor-textarea {
     flex: 1;
     background: var(--code-bg);
@@ -827,6 +840,11 @@
   let selectMode = false;
   let editMode = false;
   let livePreviewExt = null;
+  let livePreviewTimer = null;   // debounce for iframe-rendered previews
+  let livePreviewUrl = null;     // blob URL currently loaded in the preview iframe
+  // Types whose preview is a real document render (iframe) rather than a DOM
+  // rebuild -- these get debounced instead of re-rendering on every keystroke.
+  const FRAME_PREVIEW = ['html','htm','svg'];
 
   const EDITABLE = ['md','json','py','js','ts','css','txt','csv','xml','yaml','yml','mermaid','mmd','html','htm','svg'];
 
@@ -1416,20 +1434,33 @@
       ta.value = text;
 
       // Determine if live preview is needed
-      livePreviewExt = ['md','json','csv','mermaid','mmd'].includes(ext) ? ext : null;
+      livePreviewExt = ['md','json','csv','mermaid','mmd','html','htm','svg'].includes(ext) ? ext : null;
+      const framed = FRAME_PREVIEW.includes(livePreviewExt);
 
       if (livePreviewExt) {
         right.classList.add('visible');
         document.getElementById('editor-left-label').textContent = 'Edit';
         updateLivePreview(text);
-        ta.oninput = () => updateLivePreview(ta.value);
-        // Scroll sync
+        if (framed) {
+          // Reloading a document on every keystroke would thrash; settle briefly
+          // after typing stops instead.
+          ta.oninput = () => {
+            clearTimeout(livePreviewTimer);
+            livePreviewTimer = setTimeout(() => updateLivePreview(ta.value), 300);
+          };
+        } else {
+          ta.oninput = () => updateLivePreview(ta.value);
+        }
+        // Scroll sync -- only where source position maps to output position.
+        // Rendered HTML/SVG has no such mapping, so syncing would fight the user.
         const live = document.getElementById('editor-live');
-        ta.onscroll = () => {
-          const maxS = ta.scrollHeight - ta.clientHeight;
-          const pct = maxS > 0 ? ta.scrollTop / maxS : 0;
-          live.scrollTop = pct * (live.scrollHeight - live.clientHeight);
-        };
+        if (!framed) {
+          ta.onscroll = () => {
+            const maxS = ta.scrollHeight - ta.clientHeight;
+            const pct = maxS > 0 ? ta.scrollTop / maxS : 0;
+            live.scrollTop = pct * (live.scrollHeight - live.clientHeight);
+          };
+        }
         // Make divider draggable
         const edDiv = document.getElementById('editor-divider');
         const edBody = document.getElementById('editor-body');
@@ -1466,6 +1497,15 @@
     editBtn.textContent = 'Edit';
     editMode = false;
     livePreviewExt = null;
+    // Drop the pending re-render and release the blob, or the URL leaks for the
+    // lifetime of the tab every time an HTML file is edited.
+    clearTimeout(livePreviewTimer);
+    livePreviewTimer = null;
+    if (livePreviewUrl) { URL.revokeObjectURL(livePreviewUrl); livePreviewUrl = null; }
+    const live = document.getElementById('editor-live');
+    live.innerHTML = '';
+    live.className = 'editor-live';
+    live.style.cssText = '';
     document.getElementById('save-status').textContent = '';
     document.getElementById('save-status').className = 'save-status';
   }
@@ -1525,6 +1565,32 @@
         live.style.cssText = 'padding:20px;color:var(--danger);font-size:13px';
         live.textContent = 'Mermaid error: ' + err.message;
       }
+    } else if (FRAME_PREVIEW.includes(livePreviewExt)) {
+      // Render as a real document so what you see while editing is exactly
+      // what view mode shows after saving.
+      live.className = 'editor-live editor-live-frame';
+      live.style.cssText = '';
+      let frame = live.querySelector('iframe');
+      if (!frame) {
+        live.innerHTML = '';
+        frame = document.createElement('iframe');
+        frame.className = 'editor-live-iframe';
+        // Mirror renderPreview(): scripts run for HTML, SVG needs no sandbox.
+        if (livePreviewExt !== 'svg') {
+          frame.sandbox = 'allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups';
+        }
+        live.appendChild(frame);
+      }
+      // Hold the reader's position across reloads, otherwise editing anything
+      // below the fold snaps the preview back to the top on every keystroke.
+      let scrollY = 0;
+      try { scrollY = frame.contentWindow.scrollY || 0; } catch {}
+      frame.onload = () => { try { frame.contentWindow.scrollTo(0, scrollY); } catch {} };
+      const mime = livePreviewExt === 'svg' ? 'image/svg+xml' : 'text/html';
+      const nextUrl = URL.createObjectURL(new Blob([text], { type: mime + ';charset=utf-8' }));
+      if (livePreviewUrl) URL.revokeObjectURL(livePreviewUrl);
+      livePreviewUrl = nextUrl;
+      frame.src = nextUrl;
     }
   }
 
