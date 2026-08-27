@@ -19,6 +19,33 @@ PORT = 7477
 # the git tag in .github/workflows/release.yml. A build that still says
 # 0.0.0-dev was not produced by the release pipeline.
 VERSION = '0.0.0-dev'
+IS_RELEASE = VERSION != '0.0.0-dev'
+
+
+def resolve_display_version() -> str:
+    """
+    What to show the user.
+
+    Release builds report the stamped tag. A source checkout asks git instead,
+    so running from source still names something specific -- including whether
+    the working tree is dirty. "0.0.0-dev" is an internal marker and is never
+    shown: it tells the user nothing about what they are running.
+    """
+    if IS_RELEASE:
+        return VERSION
+    try:
+        import subprocess
+        src = Path(__file__).resolve().parent
+        if not (src.parent / '.git').exists():
+            return 'dev'
+        out = subprocess.run(['git', 'describe', '--tags', '--always', '--dirty'],
+                             cwd=src, capture_output=True, text=True, timeout=3)
+        return out.stdout.strip().lstrip('v') or 'dev'
+    except Exception:
+        return 'dev'
+
+
+DISPLAY_VERSION = resolve_display_version()
 if getattr(sys, 'frozen', False):
     if sys.platform == 'win32':
         _docs = Path(os.environ.get('USERPROFILE', Path.home())) / 'Documents'
@@ -28,8 +55,13 @@ if getattr(sys, 'frozen', False):
     ROOT = _base / 'artifacts'
     GALLERY_HTML = _base / 'gallery.html'
 else:
-    ROOT = Path(__file__).parent
-    GALLERY_HTML = ROOT / 'gallery.html'
+    _src = Path(__file__).resolve().parent
+    # Running from a checkout: the artifacts folder can live anywhere, so the
+    # repo stays the only copy of the code. Without this the server could only
+    # serve files sitting next to itself, which forced the code to be copied
+    # into the artifacts folder and then drift from the repo.
+    ROOT = Path(os.environ.get('CLAUDE_GALLERY_ROOT', _src)).expanduser()
+    GALLERY_HTML = _src / 'gallery.html'
 THUMB_DIR = ROOT / '.thumbnails'
 HISTORY_DIR = ROOT / '.history'
 LOG_FILE = ROOT.parent / 'gallery.log' if getattr(sys, 'frozen', False) else ROOT / 'gallery.log'
@@ -196,8 +228,8 @@ def _ver_tuple(v: str) -> tuple:
     return tuple(nums)
 
 def check_for_update() -> dict:
-    current = {'current': VERSION, 'outdated': False}
-    if VERSION == '0.0.0-dev' or os.environ.get('CLAUDE_GALLERY_NO_UPDATE_CHECK'):
+    current = {'current': DISPLAY_VERSION, 'outdated': False}
+    if not IS_RELEASE or os.environ.get('CLAUDE_GALLERY_NO_UPDATE_CHECK'):
         # Don't nag on unreleased builds, and honour the opt-out.
         return current
 
@@ -211,12 +243,12 @@ def check_for_update() -> dict:
         import urllib.request
         req = urllib.request.Request(RELEASES_API, headers={
             'Accept': 'application/vnd.github+json',
-            'User-Agent': f'claude-gallery/{VERSION}',
+            'User-Agent': f'claude-gallery/{DISPLAY_VERSION}',
         })
         with urllib.request.urlopen(req, timeout=3) as r:
             latest = json.loads(r.read()).get('tag_name', '').lstrip('v')
         if latest and _ver_tuple(latest) > _ver_tuple(VERSION):
-            result = {'current': VERSION, 'latest': latest,
+            result = {'current': DISPLAY_VERSION, 'latest': latest,
                       'outdated': True, 'url': RELEASES_PAGE}
         log.info('update check: current=%s latest=%s outdated=%s',
                  VERSION, latest or '?', result['outdated'])
@@ -413,7 +445,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({'files': ordered_files()})
 
         elif path == '/version':
-            self._json({'version': VERSION})
+            self._json({'version': DISPLAY_VERSION, 'release': IS_RELEASE})
 
         elif path == '/update-check':
             self._json(check_for_update())
@@ -519,11 +551,11 @@ if __name__ == '__main__':
     # Version and root go in the log first: when someone reports a problem,
     # these are the two facts needed before anything else can be diagnosed.
     log.info('--- Claude Gallery %s starting (python %s on %s) ---',
-             VERSION, sys.version.split()[0], sys.platform)
+             DISPLAY_VERSION, sys.version.split()[0], sys.platform)
     log.info('artifacts root: %s', ROOT)
     threading.Thread(target=heartbeat, daemon=True).start()
     if sys.stdout is not None:
-        print(f'Claude Gallery {VERSION} -> http://localhost:{PORT}', flush=True)
+        print(f'Claude Gallery {DISPLAY_VERSION} -> http://localhost:{PORT}', flush=True)
     try:
         with http.server.ThreadingHTTPServer(('127.0.0.1', PORT), Handler) as srv:
             log.info('listening on 127.0.0.1:%d', PORT)

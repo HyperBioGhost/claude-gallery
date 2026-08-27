@@ -13,6 +13,7 @@ Several cases exist because the bug they describe actually shipped:
 """
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -243,12 +244,45 @@ def test_delete_refuses_reserved_names(gallery):
 # ── version + update check ────────────────────────────────────────────
 
 def test_version_endpoint_reports_the_build(gallery):
-    assert gallery.get('/version')[1]['version'] == gallery.mod.VERSION
+    body = gallery.get('/version')[1]
+    assert body['version'] == gallery.mod.DISPLAY_VERSION
+    assert body['release'] is gallery.mod.IS_RELEASE
+
+
+def test_artifacts_root_is_overridable(tmp_path, monkeypatch):
+    """A checkout must be able to serve an artifacts folder elsewhere, or the
+    code has to be copied next to the artifacts and then drifts from the repo."""
+    import importlib.util
+    elsewhere = tmp_path / 'somewhere-else'
+    elsewhere.mkdir()
+    monkeypatch.setenv('CLAUDE_GALLERY_ROOT', str(elsewhere))
+    spec = importlib.util.spec_from_file_location(
+        'gs_env', Path(__file__).resolve().parent.parent / 'src' / 'server.py')
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.ROOT == elsewhere
+    # ...but the page itself still comes from the checkout, not the artifacts dir
+    assert mod.GALLERY_HTML.name == 'gallery.html'
+    assert mod.GALLERY_HTML.parent != elsewhere
+
+
+def test_placeholder_version_is_never_shown(gallery):
+    """0.0.0-dev is an internal marker; showing it tells the user nothing."""
+    assert gallery.mod.IS_RELEASE is False
+    assert gallery.get('/version')[1]['version'] != '0.0.0-dev'
+
+
+def test_source_checkout_reports_its_git_description(gallery):
+    """Running from the repo should name the commit, not just say "dev"."""
+    v = gallery.mod.resolve_display_version()
+    assert v != '0.0.0-dev'
+    # This test tree IS a checkout, so git describe should have answered.
+    assert v == 'dev' or v[0].isdigit() or v.replace('-dirty', '').isalnum()
 
 
 def test_dev_builds_never_report_an_update(gallery):
     """Unstamped builds must not nag, and must not call out to the network."""
-    assert gallery.mod.VERSION == '0.0.0-dev'
+    assert gallery.mod.IS_RELEASE is False
     assert gallery.get('/update-check')[1]['outdated'] is False
 
 
@@ -265,7 +299,8 @@ def test_version_comparison(gallery, current, latest, outdated):
 
 
 def test_update_check_is_silent_when_offline(gallery, monkeypatch):
-    monkeypatch.setattr(gallery.mod, 'VERSION', '2.2.0')
+    monkeypatch.setattr(gallery.mod, 'IS_RELEASE', True)
+    monkeypatch.setattr(gallery.mod, 'DISPLAY_VERSION', '2.2.0')
     monkeypatch.setattr(gallery.mod, 'RELEASES_API', 'http://127.0.0.1:1/nope')
     gallery.mod._update_cache.clear()
     body = gallery.get('/update-check')[1]
@@ -278,7 +313,8 @@ def test_update_check_can_be_opted_out(gallery, monkeypatch):
     Called in-process rather than over HTTP: patching urlopen globally would
     also break the test client's own request.
     """
-    monkeypatch.setattr(gallery.mod, 'VERSION', '2.2.0')
+    monkeypatch.setattr(gallery.mod, 'IS_RELEASE', True)
+    monkeypatch.setattr(gallery.mod, 'DISPLAY_VERSION', '2.2.0')
     monkeypatch.setenv('CLAUDE_GALLERY_NO_UPDATE_CHECK', '1')
 
     def fail(*a, **k):

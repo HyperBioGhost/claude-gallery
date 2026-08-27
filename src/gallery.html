@@ -1917,7 +1917,10 @@
       const r = await fetch('/version');
       if (!r.ok) return;
       const { version } = await r.json();
-      document.getElementById('version-badge').textContent = 'v' + version;
+      // "v" only reads correctly in front of a number -- a source checkout
+      // reports things like "2.3.0-2-gab5dd4b-dirty" or plain "dev".
+      document.getElementById('version-badge').textContent =
+        /^\d/.test(version) ? 'v' + version : version;
     } catch(e) {}
   }
 

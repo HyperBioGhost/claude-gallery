@@ -67,7 +67,10 @@ def test_version_badge_is_shown(gallery, page):
     page.wait_for_function(
         "() => document.getElementById('version-badge').textContent !== ''",
         timeout=5000)
-    assert page.locator('#version-badge').inner_text() == 'v' + gallery.mod.VERSION
+    v = gallery.mod.DISPLAY_VERSION
+    expected = ('v' + v) if v[0].isdigit() else v   # "v2.3.0", but plain "dev"
+    assert page.locator('#version-badge').inner_text() == expected
+    assert '0.0.0-dev' not in expected
 
 
 def test_dev_build_shows_no_update_pill(page):
