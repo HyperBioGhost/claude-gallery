@@ -9,8 +9,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Same suite CI runs on every push. Nothing is built from a red tree.
+  test:
+    uses: ./.github/workflows/ci.yml
+
   # ── Build Windows installer ─────────────────────────────────────────
   build-windows:
+    needs: test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,13 +24,19 @@ jobs:
           python-version: '3.12'
       - name: Install PyInstaller
         run: pip install pyinstaller
+      - name: Derive version from tag
+        id: ver
+        shell: bash
+        run: echo "v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Stamp version into sources
+        run: python build/stamp_version.py "${{ steps.ver.outputs.v }}"
       - name: Build server .exe
         run: pyinstaller build/claude-gallery-server.spec --distpath build/windows/dist
       - name: Build installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.4
         with:
           path: build/windows/installer.iss
-          options: /O+
+          options: /O+ /DAppVersion=${{ steps.ver.outputs.v }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
@@ -34,6 +45,7 @@ jobs:
 
   # ── Build macOS pkg ─────────────────────────────────────────────────
   build-mac:
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +54,14 @@ jobs:
           python-version: '3.12'
       - name: Install PyInstaller
         run: pip install pyinstaller
+      - name: Derive version from tag
+        id: ver
+        run: echo "v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Stamp version into sources
+        run: python build/stamp_version.py "${{ steps.ver.outputs.v }}"
       - name: Build .pkg
+        env:
+          VERSION: ${{ steps.ver.outputs.v }}
         run: bash build/mac/build-pkg.sh
       - uses: actions/upload-artifact@v4
         with:

@@ -74,7 +74,18 @@ else
     fail "GET /files/nonexistent returns 404" "status=$code"
 fi
 
-# ── 6. CLAUDE.md was injected ────────────────────────────────────────
+# ── 6. The built binary reports a real version ───────────────────────
+# This runs against the installed .pkg, so it is the only check that proves
+# the release pipeline actually stamped the tag. Every release from v1.0.0
+# through v2.2.0 shipped labelled "1.0.0" because nothing verified this.
+body=$(curl -sf --max-time 5 "$BASE/version" 2>/dev/null)
+if echo "$body" | grep -q '"version"' && ! echo "$body" | grep -q '0\.0\.0-dev'; then
+    pass "GET /version reports a stamped release version ($body)"
+else
+    fail "GET /version reports a stamped release version" "body=$body"
+fi
+
+# ── 7. CLAUDE.md was injected ────────────────────────────────────────
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 if [ -f "$CLAUDE_MD" ] && grep -q "claude-gallery-start" "$CLAUDE_MD"; then
     pass "CLAUDE.md contains injected gallery instructions"

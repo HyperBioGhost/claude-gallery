@@ -6,7 +6,8 @@
 set -euo pipefail
 
 APP_NAME="ClaudeGallery"
-VERSION="1.0.0"
+# Supplied by CI from the git tag; the fallback marks a non-release build.
+VERSION="${VERSION:-0.0.0-dev}"
 BUNDLE_ID="com.claude-gallery.server"
 INSTALL_DIR="/usr/local/bin"
 ARTIFACTS_DIR="$HOME/ClaudeGallery/artifacts"

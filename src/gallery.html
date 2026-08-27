@@ -303,6 +303,33 @@
     color: var(--ink-faint);
     margin-left: 4px;
   }
+  /* Version sits quietly at the end of the action row. It exists so a bug
+     report can name the build it came from. */
+  .home-meta {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .version-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.3px;
+  }
+  .update-pill {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: var(--accent);
+    background: color-mix(in oklch, var(--accent) 10%, transparent);
+    border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+    border-radius: 999px;
+    padding: 4px 10px;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .update-pill:hover { background: var(--accent); color: white; }
 
   /* Empty state */
   .empty-state {
@@ -385,6 +412,8 @@
     white-space: nowrap;
   }
   .save-status.success { color: var(--success); }
+  .save-status a { color: inherit; font-weight: 600; text-decoration: underline;
+                   text-underline-offset: 2px; cursor: pointer; }
   .save-status.error { color: var(--danger); }
 
   /* Export dropdown */
@@ -707,6 +736,10 @@
       <button class="home-action-btn" id="select-mode-btn" onclick="toggleSelectMode()">Select</button>
       <button class="home-action-btn danger" id="delete-selected-btn" onclick="deleteSelected()" style="display:none">Delete Selected</button>
       <span id="import-status"></span>
+      <span class="home-meta">
+        <a class="update-pill" id="update-pill" target="_blank" rel="noopener" style="display:none"></a>
+        <span class="version-badge" id="version-badge"></span>
+      </span>
     </div>
   </div>
   <div class="grid-wrap">
@@ -840,6 +873,7 @@
   let selectMode = false;
   let editMode = false;
   let livePreviewExt = null;
+  let undoTimer = null;          // how long the post-save Undo stays offered
   let livePreviewTimer = null;   // debounce for iframe-rendered previews
   let livePreviewUrl = null;     // blob URL currently loaded in the preview iframe
   // Types whose preview is a real document render (iframe) rather than a DOM
@@ -1609,18 +1643,59 @@
         body: JSON.stringify({ file: activeFile.name, content })
       });
       if (res.ok) {
-        status.textContent = 'Saved';
-        status.className = 'save-status success';
-        setTimeout(() => { status.textContent = ''; status.className = 'save-status'; }, 2000);
+        const info = await res.json().catch(() => ({}));
+        // cancelEdit() clears the status line, so set it afterwards or the
+        // confirmation is wiped the instant it appears.
         cancelEdit();
         renderPreview(activeFile);
         invalidateCard(activeFile.name);
+        if (info.undoable) {
+          // The previous content is snapshotted server-side. Offer the way back
+          // for long enough to notice a bad edit, not just long enough to blink.
+          status.innerHTML = 'Saved &middot; <a href="#" id="undo-link">Undo</a>';
+          status.className = 'save-status success';
+          document.getElementById('undo-link').onclick = e => { e.preventDefault(); undoSave(); };
+          clearTimeout(undoTimer);
+          undoTimer = setTimeout(() => {
+            status.textContent = ''; status.className = 'save-status';
+          }, 10000);
+        } else {
+          status.textContent = 'Saved';
+          status.className = 'save-status success';
+          setTimeout(() => { status.textContent = ''; status.className = 'save-status'; }, 2000);
+        }
       } else {
         status.textContent = 'Save failed (' + res.status + ')';
         status.className = 'save-status error';
       }
     } catch(e) {
       status.textContent = 'Error: ' + e.message;
+      status.className = 'save-status error';
+    }
+  }
+
+  // ── Undo ──────────────────────────────────────────────────────────
+
+  async function undoSave() {
+    if (!activeFile) return;
+    const status = document.getElementById('save-status');
+    clearTimeout(undoTimer);
+    status.textContent = 'Reverting...';
+    status.className = 'save-status';
+    try {
+      const res = await fetch('/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: activeFile.name })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      renderPreview(activeFile);
+      invalidateCard(activeFile.name);
+      status.textContent = 'Reverted';
+      status.className = 'save-status success';
+      setTimeout(() => { status.textContent = ''; status.className = 'save-status'; }, 2500);
+    } catch(e) {
+      status.textContent = 'Undo failed: ' + e.message;
       status.className = 'save-status error';
     }
   }
@@ -1832,10 +1907,39 @@
     }
   });
 
+  // ── Version + update check ────────────────────────────────────────
+  // Runs once per page load, which is what "launching the gallery" means for
+  // a page that stays open. The server caches the upstream lookup, so a
+  // refresh is cheap. Both are decorative -- a failure shows nothing.
+
+  async function showVersion() {
+    try {
+      const r = await fetch('/version');
+      if (!r.ok) return;
+      const { version } = await r.json();
+      document.getElementById('version-badge').textContent = 'v' + version;
+    } catch(e) {}
+  }
+
+  async function checkUpdate() {
+    try {
+      const r = await fetch('/update-check');
+      if (!r.ok) return;
+      const u = await r.json();
+      if (!u.outdated) return;
+      const pill = document.getElementById('update-pill');
+      pill.textContent = 'v' + u.latest + ' available';
+      pill.href = u.url;
+      pill.style.display = '';
+    } catch(e) {}
+  }
+
   // ── Init ──────────────────────────────────────────────────────────
 
   loadFiles();
   connect();
+  showVersion();
+  checkUpdate();
 </script>
 <!-- そうしろと囁くのよ、私のゴーストが -->
 </body>

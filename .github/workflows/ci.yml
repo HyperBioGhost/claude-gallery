@@ -1,0 +1,47 @@
+name: CI
+
+# Runs on every push and pull request, so master is always known-good. Before
+# this existed the only validation was cutting a release, which meant a broken
+# gallery.html could only be discovered by shipping it.
+#
+# release.yml calls this workflow as a gate, so the installers are never built
+# from a tree that fails here.
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: |
+          pip install pytest playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Version placeholder is intact
+        # The release build stamps the git tag into src/server.py. If someone
+        # hardcodes a version instead, releases start lying about what they are.
+        run: python build/stamp_version.py --check
+
+      - name: Server tests
+        run: python -m pytest tests/test_server.py -q
+
+      - name: Gallery UI tests
+        run: python -m pytest tests/test_gallery_ui.py -q
+
+      - name: Assets are well-formed
+        run: |
+          python -c "import xml.dom.minidom as m; m.parse('assets/features.svg'); print('features.svg OK')"
+          python -c "import xml.dom.minidom as m; m.parse('assets/icon.svg'); print('icon.svg OK')"

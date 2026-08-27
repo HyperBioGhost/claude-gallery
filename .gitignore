@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local runtime state, never committed
+artifacts/
+artifacts.json
+gallery.log*
+.thumbnails/
+.history/
+*.tmp
+
+# Build output
+build/windows/dist/
+build/windows/Output/
+build/mac/dist/
+build/mac/root/
+dist/
+*.spec.bak

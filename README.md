@@ -34,6 +34,9 @@ After installation:
 - A small local server (~15MB RAM, 0% CPU when idle) runs on port 7477
 - Claude Code is configured globally to send all generated artifacts to the gallery
 - The browser uses a push connection (SSE) — no polling, no background activity
+- Editing an artifact snapshots the previous version first, so a save can be undone. Snapshots live in `artifacts/.history/` (last 10 per file)
+- Activity and errors are logged to `ClaudeGallery/gallery.log` — attach it to a bug report
+- On page load the gallery asks GitHub whether a newer release exists, and shows a pill if so. That is the only outbound request the app makes; set `CLAUDE_GALLERY_NO_UPDATE_CHECK=1` to turn it off
 
 ## Uninstall
 

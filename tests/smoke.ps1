@@ -90,7 +90,21 @@ try {
     else { Fail "GET /files/nonexistent returns 404" "status=$code" }
 } catch { Fail "GET /files/nonexistent returns 404" $_.Exception.Message }
 
-# ── 6. CLAUDE.md was injected ────────────────────────────────────────
+# ── 6. The built binary reports a real version ───────────────────────
+# This runs against the installed .exe, so it is the only check that proves
+# the release pipeline actually stamped the tag. Every release from v1.0.0
+# through v2.2.0 shipped labelled "1.0.0" because nothing verified this.
+try {
+    $r = Invoke-WebRequest -Uri "$base/version" -UseBasicParsing -TimeoutSec 5
+    $v = ($r.Content | ConvertFrom-Json).version
+    if ($v -and $v -ne "0.0.0-dev") {
+        Pass "GET /version reports a stamped release version ($v)"
+    } else {
+        Fail "GET /version reports a stamped release version" "version=$v"
+    }
+} catch { Fail "GET /version reports a stamped release version" $_.Exception.Message }
+
+# ── 7. CLAUDE.md was injected ────────────────────────────────────────
 $claudeMd = Join-Path $env:USERPROFILE ".claude\CLAUDE.md"
 if (Test-Path $claudeMd) {
     $content = Get-Content $claudeMd -Raw

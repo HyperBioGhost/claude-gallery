@@ -2,7 +2,11 @@
 ; Requires Inno Setup 6+ (https://jrsoftware.org/isinfo.php)
 
 #define AppName "Claude Gallery"
-#define AppVersion "1.0.0"
+; AppVersion comes from CI as /DAppVersion=<tag>. The fallback marks a
+; build that did not come from the release pipeline.
+#ifndef AppVersion
+  #define AppVersion "0.0.0-dev"
+#endif
 #define AppPublisher "Claude Gallery"
 #define AppURL "https://github.com/HyperBioGhost/claude-gallery"
 #define AppExeName "claude-gallery-server.exe"
