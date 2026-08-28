@@ -214,6 +214,83 @@ def test_leaving_edit_mode_clears_the_live_pane(gallery, page):
     assert page.locator('#editor-live iframe').count() == 0
 
 
+# ── external links ────────────────────────────────────────────────────
+
+@pytest.fixture
+def coop_site():
+    """
+    A stand-in for an auth-gated site: sends Cross-Origin-Opener-Policy, as
+    Amazon internal tools (atoz.amazon.work et al) do.
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_GET(self):
+            body = b'<!doctype html><h1 id="target-loaded">TARGET LOADED</h1>'
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.send_header('X-Frame-Options', 'SAMEORIGIN')
+            self.send_header('Cross-Origin-Opener-Policy', 'same-origin-allow-popups')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    srv = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f'http://127.0.0.1:{srv.server_address[1]}/target'
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_external_link_opens_a_working_tab(gallery, page, coop_site):
+    """
+    Regression: the preview sandbox must include allow-popups-to-escape-sandbox.
+
+    Without it the new tab inherits the sandbox, a sandboxed top-level document
+    cannot satisfy Cross-Origin-Opener-Policy, and Chrome refuses the response
+    with ERR_BLOCKED_BY_RESPONSE -- while the same link works when the file is
+    opened outside the gallery. Any COOP-sending site reproduces it.
+    """
+    gallery.write('links.html',
+                  '<!doctype html><html><body><h1>links</h1>'
+                  f'<a id="ext" href="{coop_site}" target="_blank" rel="noopener">go</a>'
+                  '</body></html>')
+    page.reload(wait_until='networkidle')
+    page.click('.card:has-text("links.html")')
+    page.wait_for_selector('#detail-preview > iframe')
+
+    opened = []
+    page.context.on('page', lambda p: opened.append(p))
+    page.frame_locator('#detail-preview > iframe').locator('#ext').click()
+    page.wait_for_timeout(2500)
+
+    assert len(opened) == 1, 'link did not open a tab'
+    tab = opened[0]
+    assert not tab.url.startswith('chrome-error'), \
+        f'tab was blocked instead of loading: {tab.url}'
+    assert 'TARGET LOADED' in tab.content()
+
+
+def test_both_previews_share_one_sandbox_policy(gallery, page):
+    """View mode and edit mode must not drift apart on sandbox flags."""
+    gallery.write('links.html', '<!doctype html><html><body><p>x</p></body></html>')
+    page.reload(wait_until='networkidle')
+    page.click('.card:has-text("links.html")')
+    page.wait_for_selector('#detail-preview > iframe')
+    view = page.get_attribute('#detail-preview > iframe', 'sandbox')
+
+    page.click('#edit-btn')
+    page.wait_for_selector('#editor-live iframe')
+    edit = page.get_attribute('#editor-live iframe', 'sandbox')
+
+    assert view == edit
+    assert 'allow-popups-to-escape-sandbox' in view
+
+
 # ── save + undo ───────────────────────────────────────────────────────
 
 def test_save_then_undo_restores_the_file(gallery, page):

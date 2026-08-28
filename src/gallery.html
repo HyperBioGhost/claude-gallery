@@ -880,6 +880,18 @@
   // rebuild -- these get debounced instead of re-rendering on every keystroke.
   const FRAME_PREVIEW = ['html','htm','svg'];
 
+  // One definition for both the view-mode preview and the edit-mode live
+  // preview, so the two cannot drift.
+  //
+  // allow-popups-to-escape-sandbox matters more than it looks. Without it a
+  // link opened from the preview inherits this sandbox, and a sandboxed
+  // top-level document cannot satisfy Cross-Origin-Opener-Policy -- so any
+  // site sending COOP (most auth-gated ones, including Amazon internal tools)
+  // is refused with ERR_BLOCKED_BY_RESPONSE. The same link works when the file
+  // is opened directly, because then there is no sandbox to inherit.
+  const PREVIEW_SANDBOX = 'allow-scripts allow-same-origin allow-forms ' +
+                          'allow-pointer-lock allow-popups allow-popups-to-escape-sandbox';
+
   const EDITABLE = ['md','json','py','js','ts','css','txt','csv','xml','yaml','yml','mermaid','mmd','html','htm','svg'];
 
   // ── Utilities ─────────────────────────────────────────────────────
@@ -1340,7 +1352,7 @@
     if (['html','htm','svg'].includes(ext)) {
       const iframe = document.createElement('iframe');
       iframe.src = url;
-      if (ext !== 'svg') iframe.sandbox = 'allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups';
+      if (ext !== 'svg') iframe.sandbox = PREVIEW_SANDBOX;
       area.appendChild(iframe);
 
     // Images
@@ -1611,7 +1623,7 @@
         frame.className = 'editor-live-iframe';
         // Mirror renderPreview(): scripts run for HTML, SVG needs no sandbox.
         if (livePreviewExt !== 'svg') {
-          frame.sandbox = 'allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups';
+          frame.sandbox = PREVIEW_SANDBOX;
         }
         live.appendChild(frame);
       }
