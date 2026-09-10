@@ -801,7 +801,23 @@
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1/dist/html2canvas.min.js"></script>
 <script>
-  mermaid.initialize({ startOnLoad: false, theme: 'default' });
+  // Markdown, syntax highlighting, diagrams and PNG export come from CDNs.
+  // Guard every touch of them: this was the first statement in the script, so
+  // an unreachable CDN threw a ReferenceError here and NOTHING below ran --
+  // including loadFiles(). The whole gallery sat on "Loading artifacts..."
+  // because a diagram library was missing. Browsing and previewing must work
+  // offline; only the features that genuinely need a library degrade.
+  const haveLib = name => typeof window[name] !== 'undefined';
+
+  function libMissingHTML(name, what) {
+    return '<div style="padding:24px;color:var(--ink-faint);font-size:13px;line-height:1.6">'
+         + '<strong>' + what + ' needs ' + name + '</strong><br>'
+         + 'That library loads from a CDN and could not be reached, so this '
+         + 'artifact cannot be rendered right now. Everything else still works.'
+         + '</div>';
+  }
+
+  if (haveLib('mermaid')) mermaid.initialize({ startOnLoad: false, theme: 'default' });
 
   // ── Import (drag-drop + file picker) ─────────────────────────────
 
@@ -993,7 +1009,7 @@
     code.textContent = text;
     pre.appendChild(code);
     wrap.appendChild(pre);
-    requestAnimationFrame(() => hljs.highlightElement(code));
+    if (haveLib('hljs')) requestAnimationFrame(() => hljs.highlightElement(code));
     return wrap;
   }
 
@@ -1388,7 +1404,9 @@
         const leftEl = makeCodeBlock(text, 'markdown');
         const rightEl = document.createElement('div');
         rightEl.className = 'md-rendered';
-        rightEl.innerHTML = marked.parse(text);
+        rightEl.innerHTML = haveLib('marked')
+          ? marked.parse(text)
+          : libMissingHTML('marked', 'Markdown rendering');
         area.appendChild(makeSplitPane('Source', leftEl, 'Rendered', rightEl, true));
       });
 
@@ -1415,6 +1433,10 @@
         const rightEl = document.createElement('div');
         rightEl.style.cssText = 'padding:24px;display:flex;align-items:center;justify-content:center;min-height:100%;background:var(--paper-warm)';
         try {
+          if (!haveLib('mermaid')) {
+            rightEl.innerHTML = libMissingHTML('mermaid', 'Diagram rendering');
+            return;
+          }
           const { svg } = await mermaid.render('mmd-' + Date.now(), text);
           rightEl.innerHTML = svg;
         } catch(err) {
@@ -1561,7 +1583,9 @@
     if (livePreviewExt === 'md') {
       live.className = 'editor-live md-rendered';
       live.style.padding = '28px 32px';
-      live.innerHTML = marked.parse(text);
+      live.innerHTML = haveLib('marked')
+        ? marked.parse(text)
+        : libMissingHTML('marked', 'Markdown rendering');
     } else if (livePreviewExt === 'json') {
       live.className = 'editor-live';
       live.innerHTML = '';
@@ -1603,6 +1627,11 @@
       live.className = 'editor-live';
       live.innerHTML = '';
       live.style.cssText = 'padding:24px;display:flex;align-items:center;justify-content:center;min-height:100%;background:var(--paper-warm)';
+      if (!haveLib('mermaid')) {
+        live.style.cssText = '';
+        live.innerHTML = libMissingHTML('mermaid', 'Diagram rendering');
+        return;
+      }
       try {
         const id = 'mmd-live-' + Date.now();
         mermaid.render(id, text).then(({ svg }) => { live.innerHTML = svg; })

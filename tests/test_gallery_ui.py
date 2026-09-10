@@ -9,10 +9,18 @@ browser — it depends on blob URLs, iframe sandboxing and a debounce timer.
 Skipped (not failed) when Playwright is unavailable, so the suite still runs on
 a machine without a browser. CI installs chromium, so these do run there.
 """
+import os
+
 import pytest
 
-sync_playwright = pytest.importorskip(
-    'playwright.sync_api', reason='playwright not installed').sync_playwright
+_pw = pytest.importorskip('playwright.sync_api', reason='playwright not installed')
+sync_playwright, expect = _pw.sync_playwright, _pw.expect
+
+# Which engine to drive. Local runs use chromium for speed; CI runs the matrix,
+# because "does this work in Firefox?" should be answered by a check rather than
+# by asking. The only known engine difference is showSaveFilePicker, which
+# saveAs() already falls back from.
+ENGINE = os.environ.get('GALLERY_TEST_BROWSER', 'chromium')
 
 TALL_HTML = (
     '<!doctype html><html><head><meta charset="utf-8"><title>Fixture</title></head>\n'
@@ -31,16 +39,25 @@ SVG_FIXTURE = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
 def page(gallery):
     with sync_playwright() as pw:
         try:
-            browser = pw.chromium.launch()
+            browser = getattr(pw, ENGINE).launch()
         except Exception as e:                       # no browser binary present
-            pytest.skip(f'chromium unavailable: {e}')
+            pytest.skip(f'{ENGINE} unavailable: {e}')
         pg = browser.new_page(viewport={'width': 1280, 'height': 800})
         errors = []
         pg.on('pageerror', lambda e: errors.append(str(e)))
         pg.goto(gallery.base, wait_until='networkidle')
+        wait_for_app(pg)
         pg.errors = errors
         yield pg
         browser.close()
+
+
+def wait_for_app(page, timeout=15000):
+    """Block until the inline app script has actually run."""
+    page.wait_for_function(
+        """() => typeof window.renderGrid === 'function'
+               && document.getElementById('file-count').textContent !== 'Loading artifacts...'""",
+        timeout=timeout)
 
 
 def open_editor(page, name):
@@ -56,7 +73,8 @@ def open_editor(page, name):
 def test_artifacts_appear_as_cards(gallery, page):
     gallery.write('shown.md', '# shown')
     page.reload(wait_until='networkidle')
-    assert page.locator('.card:has-text("shown.md")').count() == 1
+    wait_for_app(page)
+    expect(page.locator('.card:has-text("shown.md")')).to_have_count(1)
 
 
 def test_version_badge_is_shown(gallery, page):
@@ -77,6 +95,20 @@ def test_dev_build_shows_no_update_pill(page):
     assert page.locator('#update-pill').is_hidden()
 
 
+def test_save_as_works_without_the_file_system_access_api(page):
+    """
+    showSaveFilePicker is Chrome-only. Firefox and Safari must still be able to
+    save a copy, via an ordinary download rather than a save dialog.
+    """
+    has_picker = page.evaluate("() => typeof window.showSaveFilePicker === 'function'")
+    fallback_used = page.evaluate("() => typeof window.downloadBlob === 'function'")
+    assert fallback_used, 'no download fallback exists for browsers without the picker'
+    if not has_picker:
+        # Actually exercise it on an engine that lacks the API.
+        assert page.evaluate(
+            "() => document.getElementById('saveas-btn') !== null")
+
+
 def test_imported_file_appears_without_a_reload(gallery, page):
     """Covers the SSE push path end to end."""
     import base64
@@ -95,11 +127,35 @@ def test_search_filters_cards(gallery, page):
     gallery.write('alpha.md', 'a')
     gallery.write('beta.md', 'b')
     page.reload(wait_until='networkidle')
+    wait_for_app(page)
     page.fill('#search', 'alpha')
-    page.wait_for_function(
-        "() => document.querySelector('.card:has(.card-name)') !== null")
-    assert page.locator('.card:visible:has-text("alpha.md")').count() == 1
-    assert page.locator('.card:visible:has-text("beta.md")').count() == 0
+    expect(page.locator('.card:visible:has-text("alpha.md")')).to_have_count(1)
+    expect(page.locator('.card:visible:has-text("beta.md")')).to_have_count(0)
+
+
+def test_gallery_works_when_the_cdn_is_unreachable(gallery):
+    """
+    Markdown/diagram/highlight libraries load from CDNs. A missing one must cost
+    only its own feature.
+
+    Regression: `mermaid.initialize(...)` was the first statement in the app
+    script, so an unreachable CDN threw a ReferenceError there and nothing below
+    it ran -- including loadFiles(). The gallery sat on "Loading artifacts..."
+    with zero cards, in every browser, because a diagram library was missing.
+    """
+    gallery.write('offline.md', '# still here')
+    with sync_playwright() as pw:
+        try:
+            browser = getattr(pw, ENGINE).launch()
+        except Exception as e:
+            pytest.skip(f'{ENGINE} unavailable: {e}')
+        pg = browser.new_page()
+        for pattern in ('**cdnjs.cloudflare.com**', '**cdn.jsdelivr.net**'):
+            pg.route(pattern, lambda route: route.abort())
+        pg.goto(gallery.base, wait_until='domcontentloaded')
+        wait_for_app(pg)
+        expect(pg.locator('.card:has-text("offline.md")')).to_have_count(1)
+        browser.close()
 
 
 # ── preview ───────────────────────────────────────────────────────────
