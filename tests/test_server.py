@@ -272,6 +272,24 @@ def test_placeholder_version_is_never_shown(gallery):
     assert gallery.get('/version')[1]['version'] != '0.0.0-dev'
 
 
+def test_version_fallback_records_a_reason(gallery, monkeypatch, tmp_path):
+    """
+    A "dev" badge must be diagnosable. A bare except here once turned every
+    cause -- not a checkout, git missing, git too slow -- into the same silent
+    "dev", which could not be told apart from outside the process.
+    """
+    import subprocess
+
+    def too_slow(*a, **k):
+        raise subprocess.TimeoutExpired(cmd='git describe', timeout=8)
+
+    # resolve_display_version imports subprocess locally, so patch the module.
+    monkeypatch.setattr(subprocess, 'run', too_slow)
+    monkeypatch.setattr(gallery.mod, '_version_note', '')
+    assert gallery.mod.resolve_display_version() == 'dev'
+    assert 'TimeoutExpired' in gallery.mod._version_note
+
+
 def test_source_checkout_reports_its_git_description(gallery):
     """Running from the repo should name the commit, not just say "dev"."""
     v = gallery.mod.resolve_display_version()

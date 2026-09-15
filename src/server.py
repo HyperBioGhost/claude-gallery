@@ -22,6 +22,11 @@ VERSION = '0.0.0-dev'
 IS_RELEASE = VERSION != '0.0.0-dev'
 
 
+# Why the version fell back, if it did. Recorded rather than logged because
+# this runs at import time, before setup_logging(); __main__ logs it afterwards.
+_version_note = ''
+
+
 def resolve_display_version() -> str:
     """
     What to show the user.
@@ -30,18 +35,35 @@ def resolve_display_version() -> str:
     so running from source still names something specific -- including whether
     the working tree is dirty. "0.0.0-dev" is an internal marker and is never
     shown: it tells the user nothing about what they are running.
+
+    Every fallback records a reason. A bare `except` here previously turned any
+    failure into a silent "dev", which made the difference between "not a
+    checkout", "git missing" and "git too slow" impossible to tell apart from
+    the outside. The timeout is generous because the first git.exe launch after
+    boot can be slow enough to lose a 3s race against on-access scanning.
     """
+    global _version_note
     if IS_RELEASE:
         return VERSION
     try:
         import subprocess
         src = Path(__file__).resolve().parent
         if not (src.parent / '.git').exists():
+            _version_note = f'no .git beside {src}, so there is no tag to read'
             return 'dev'
-        out = subprocess.run(['git', 'describe', '--tags', '--always', '--dirty'],
-                             cwd=src, capture_output=True, text=True, timeout=3)
-        return out.stdout.strip().lstrip('v') or 'dev'
-    except Exception:
+        out = subprocess.run(
+            ['git', 'describe', '--tags', '--always', '--dirty'],
+            cwd=src, capture_output=True, text=True, timeout=8,
+            # pythonw has no usable console; give git a real stdin regardless.
+            stdin=subprocess.DEVNULL)
+        described = out.stdout.strip().lstrip('v')
+        if not described:
+            _version_note = (f'git describe exited {out.returncode}: '
+                             f'{out.stderr.strip()[:200] or "no output"}')
+            return 'dev'
+        return described
+    except Exception as e:
+        _version_note = f'{type(e).__name__}: {e}'
         return 'dev'
 
 
@@ -553,6 +575,8 @@ if __name__ == '__main__':
     log.info('--- Claude Gallery %s starting (python %s on %s) ---',
              DISPLAY_VERSION, sys.version.split()[0], sys.platform)
     log.info('artifacts root: %s', ROOT)
+    if _version_note:
+        log.warning('version shown as "%s" -- %s', DISPLAY_VERSION, _version_note)
     threading.Thread(target=heartbeat, daemon=True).start()
     if sys.stdout is not None:
         print(f'Claude Gallery {DISPLAY_VERSION} -> http://localhost:{PORT}', flush=True)
