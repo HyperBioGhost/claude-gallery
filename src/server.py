@@ -407,6 +407,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path in ('/', '/gallery.html'):
             self.serve_file(GALLERY_HTML, 'text/html')
 
+        elif path == '/arasaka-lockup.png':
+            self.serve_file(GALLERY_HTML.with_name('arasaka-lockup.png'), 'image/png')
+
         elif path == '/notify':
             fname = qs.get('file', [None])[0]
             if fname:

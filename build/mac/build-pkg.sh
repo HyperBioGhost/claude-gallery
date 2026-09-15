@@ -41,6 +41,7 @@ chmod +x "$STAGE$INSTALL_DIR/open-claude-gallery"
 # Gallery HTML — installed to a fixed system path; postinstall copies to user home
 mkdir -p "$STAGE/Library/ClaudeGallery"
 cp src/gallery.html "$STAGE/Library/ClaudeGallery/"
+cp src/arasaka-lockup.png "$STAGE/Library/ClaudeGallery/"
 
 # launchd plist — use ~ which launchd expands to the loading user's home at runtime
 # Do NOT embed $HOME here — this plist is installed system-wide and loaded per-user
@@ -72,6 +73,7 @@ mkdir -p "$HOME/ClaudeGallery/artifacts"
 
 # Copy gallery.html from system install location to user home
 cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
+cp /Library/ClaudeGallery/arasaka-lockup.png "$HOME/ClaudeGallery/arasaka-lockup.png"
 
 MARKER="claude-gallery-start"
 if ! grep -q "$MARKER" "$CLAUDE_MD" 2>/dev/null; then

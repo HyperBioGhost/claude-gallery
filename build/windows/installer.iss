@@ -42,6 +42,7 @@ FinishedLabel=Open Kiro or Claude Code and start generating%n— your artifacts 
 [Files]
 Source: "dist\{#AppExeName}";          DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\gallery.html";      DestDir: "{userdocs}\ClaudeGallery"; Flags: ignoreversion
+Source: "..\..\src\arasaka-lockup.png"; DestDir: "{userdocs}\ClaudeGallery"; Flags: ignoreversion
 Source: "..\..\src\inject-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\remove-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\register-task.ps1"; DestDir: "{app}";                  Flags: ignoreversion
