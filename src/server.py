@@ -84,10 +84,14 @@ else:
     # into the artifacts folder and then drift from the repo.
     ROOT = Path(os.environ.get('CLAUDE_GALLERY_ROOT', _src)).expanduser()
     GALLERY_HTML = _src / 'gallery.html'
-THUMB_DIR = ROOT / '.thumbnails'
+# Grid-card thumbnails: one PNG per HTML artifact, captured by the browser
+# when the artifact is opened. Deliberately allowed to go stale -- the grid
+# shows the last capture rather than re-rendering every document on load.
+# (.thumbnails/ was an earlier html2canvas cache and is no longer read.)
+THUMBNAIL_DIR = ROOT / '.card-thumbnails'
 HISTORY_DIR = ROOT / '.history'
 LOG_FILE = ROOT.parent / 'gallery.log' if getattr(sys, 'frozen', False) else ROOT / 'gallery.log'
-SKIP = {'gallery.html', 'server.py', 'artifacts.json', '.thumbnails', '.history',
+SKIP = {'gallery.html', 'server.py', 'artifacts.json', '.thumbnails', '.card-thumbnails', '.history',
         'gallery.log', 'gallery.log.1'}
 INDEX_FILE = ROOT / 'artifacts.json'
 HISTORY_KEEP = 10            # snapshots retained per file
@@ -177,6 +181,15 @@ def history_list(fname: str) -> list[dict]:
     return out
 
 
+def thumbnail_path(fname: str) -> Path:
+    return THUMBNAIL_DIR / (fname + '.png')
+
+def thumbnail_mtime(fname: str):
+    """Epoch ms of the card thumbnail for fname, or None if never captured."""
+    p = thumbnail_path(fname)
+    return int(p.stat().st_mtime * 1000) if p.is_file() else None
+
+
 # ── Insertion-order index ──────────────────────────────────────────────
 # artifacts.json stores a list of filenames in insertion order (oldest first).
 # The /list endpoint reverses it so newest appears at the top of the gallery.
@@ -235,6 +248,8 @@ def ordered_files() -> list[dict]:
     # Combine: unindexed (oldest) + indexed (in arrival order), then reverse
     combined = unindexed + indexed
     combined.reverse()   # newest first
+    for f in combined:
+        f['thumbnail_mtime'] = thumbnail_mtime(f['name'])
     return combined
 
 
@@ -348,6 +363,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         continue
                     if fpath.is_file():
                         fpath.unlink()
+                        thumbnail_path(fname).unlink(missing_ok=True)
                         deleted.append(fname)
                 with _index_lock:
                     order = load_index()
@@ -367,13 +383,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body = json.loads(self.rfile.read(length))
                 fname = body.get('file', '')
                 data_url = body.get('data', '')
-                if not fname or not data_url:
+                if not fname or not data_url or fname in SKIP:
                     self.send_error(400); return
-                THUMB_DIR.mkdir(exist_ok=True)
+                artifact = (ROOT / fname).resolve()
+                target = thumbnail_path(fname).resolve()
+                if (not artifact.is_relative_to(ROOT.resolve()) or not artifact.is_file()
+                        or not target.is_relative_to(THUMBNAIL_DIR.resolve())):
+                    self.send_error(403); return
+                THUMBNAIL_DIR.mkdir(exist_ok=True)
                 png_data = base64.b64decode(data_url.split(',', 1)[1])
-                atomic_write_bytes(THUMB_DIR / (fname + '.png'), png_data)
-                self._empty_ok()
+                atomic_write_bytes(target, png_data)
+                self._json({'file': fname, 'thumbnail_mtime': thumbnail_mtime(fname)})
             except Exception as e:
+                log.error('thumbnail save failed\n%s', traceback.format_exc())
                 self.send_error(500, str(e))
 
         elif path == '/import':
@@ -479,9 +501,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({'file': fname, 'snapshots': history_list(fname)})
 
         elif path.startswith('/thumb/'):
-            name = path[7:]
-            fpath = THUMB_DIR / name
-            if fpath.is_file():
+            fpath = (THUMBNAIL_DIR / path[7:]).resolve()
+            if fpath.is_relative_to(THUMBNAIL_DIR.resolve()) and fpath.is_file():
                 self.serve_file(fpath, 'image/png')
             else:
                 self.send_error(404)

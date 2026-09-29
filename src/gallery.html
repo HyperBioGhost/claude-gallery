@@ -144,6 +144,16 @@
     max-height: 85%;
     object-fit: contain;
   }
+  .card-preview img.card-thumbnail {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: cover;
+    object-position: top left;
+  }
   .card-icon {
     display: flex;
     align-items: center;
@@ -800,6 +810,7 @@
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.js"></script>
 <script>
   // Markdown, syntax highlighting, diagrams and PNG export come from CDNs.
   // Guard every touch of them: this was the first statement in the script, so
@@ -1062,6 +1073,9 @@
       const res = await fetch('/list');
       const data = await res.json();
       files = data.files || [];
+      files.forEach(f => {
+        if (f.thumbnail_mtime) thumbnailMtimeByName.set(f.name, f.thumbnail_mtime);
+      });
       filtered = [...files];
       renderGrid();
       document.getElementById('file-count').textContent = files.length + ' artifact' + (files.length !== 1 ? 's' : '');
@@ -1094,12 +1108,27 @@
     const preview = document.createElement('div');
     preview.className = 'card-preview';
 
-    if (['html','htm','svg'].includes(ext)) {
+    if (THUMBNAIL_EXT.includes(ext) && thumbnailMtimeByName.has(f.name)) {
+      // Last capture, however old. Rendering every document on load is what
+      // made startup slow; opening an artifact is what refreshes this.
+      preview.appendChild(thumbnailImg(f.name));
+    } else if (THUMBNAIL_EXT.includes(ext) && haveLib('htmlToImage')) {
+      // Never captured: show the type badge, capture once it scrolls into view.
+      preview.innerHTML = '<div class="card-icon"><span class="type-badge type-' + type + '">.' + ext + '</span></div>';
+      captureWhenVisible(f.name, preview);
+    } else if (['html','htm'].includes(ext)) {
+      // No rasteriser (CDN unreachable): fall back to rendering the page live.
       const iframe = document.createElement('iframe');
       iframe.src = '/files/' + encodeURIComponent(f.name);
       iframe.loading = 'lazy';
       iframe.sandbox = '';
       preview.appendChild(iframe);
+    } else if (ext === 'svg') {
+      // An <img> draws an SVG without standing up a whole document.
+      const img = document.createElement('img');
+      img.src = '/files/' + encodeURIComponent(f.name);
+      img.loading = 'lazy';
+      preview.appendChild(img);
     } else if (['png','jpg','jpeg','gif','webp'].includes(ext)) {
       const img = document.createElement('img');
       img.src = '/files/' + encodeURIComponent(f.name);
@@ -1189,69 +1218,145 @@
 
   // Force a fresh reload of one card's preview (called after edit/save)
   function invalidateCard(fname) {
-    cardCache.delete(fname);
+    // Mark stale rather than delete: getCard() then swaps the node in place.
+    // Deleting the entry orphaned the old node inside the grid, and the next
+    // renderGrid() appended a second card beside it.
+    const cached = cardCache.get(fname);
+    if (cached) cached.mtime = -1;
+    if (THUMBNAIL_EXT.includes(getExt(fname))) queueThumbnailCapture(fname, true);
   }
 
-  // ── Thumbnail generation ──────────────────────────────────────────
+  // ── Card thumbnails ───────────────────────────────────────────────
+  // The grid shows a stored PNG per HTML artifact instead of a live iframe.
+  // A thumbnail is refreshed only when its artifact is opened, saved or
+  // reverted; otherwise it stays as it was, however stale. Captures run one at
+  // a time in an off-screen iframe sized to the card's viewport, so a capture
+  // never competes with what the user is looking at.
 
-  const thumbQueue = [];
-  let thumbProcessing = false;
+  const THUMBNAIL_EXT = ['html', 'htm'];
+  const THUMBNAIL_VIEWPORT = { width: 720, height: 400 };  // ~2x a card, so it stays sharp
+  const thumbnailMtimeByName = new Map();   // artifact name -> epoch ms of its capture
+  const thumbnailQueue = [];
+  const thumbnailQueued = new Set();
+  let thumbnailCapturing = false;
+  let thumbnailCapturingName = null;
+  // Asked for again while its capture was already running -- that capture may
+  // have loaded the old content, so it must run once more when it finishes.
+  const thumbnailRecapture = new Set();
 
-  function generateThumb(fname, previewEl) {
+  function thumbnailImg(fname) {
+    const img = document.createElement('img');
+    img.className = 'card-thumbnail';
+    img.alt = '';
+    img.decoding = 'async';
+    img.src = '/thumb/' + encodeURIComponent(fname) + '.png?v=' + thumbnailMtimeByName.get(fname);
+    return img;
+  }
+
+  function captureWhenVisible(fname, previewEl) {
     const observer = new IntersectionObserver((entries, obs) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          obs.disconnect();
-          thumbQueue.push({ fname, previewEl });
-          processThumbQueue();
-        }
-      });
-    }, { threshold: 0.1 });
+      if (entries.some(e => e.isIntersecting)) {
+        obs.disconnect();
+        queueThumbnailCapture(fname, false);
+      }
+    });
     observer.observe(previewEl);
   }
 
-  function processThumbQueue() {
-    if (thumbProcessing || thumbQueue.length === 0) return;
-    thumbProcessing = true;
-    const { fname, previewEl } = thumbQueue.shift();
+  // urgent: the user just opened or changed this artifact, so it jumps the
+  // queue ahead of never-captured cards that merely scrolled into view.
+  function queueThumbnailCapture(fname, urgent) {
+    if (!haveLib('htmlToImage')) return;
+    if (fname === thumbnailCapturingName) { thumbnailRecapture.add(fname); return; }
+    if (thumbnailQueued.has(fname)) {
+      if (urgent) {   // promote an already-queued background capture
+        thumbnailQueue.splice(thumbnailQueue.indexOf(fname), 1);
+        thumbnailQueue.unshift(fname);
+      }
+      return;
+    }
+    thumbnailQueued.add(fname);
+    urgent ? thumbnailQueue.unshift(fname) : thumbnailQueue.push(fname);
+    drainThumbnailQueue();
+  }
 
-    const container = document.createElement('div');
-    container.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;height:600px;overflow:hidden';
-    document.body.appendChild(container);
+  async function drainThumbnailQueue() {
+    if (thumbnailCapturing) return;
+    thumbnailCapturing = true;
+    while (thumbnailQueue.length) {
+      const fname = thumbnailQueue.shift();
+      thumbnailCapturingName = fname;
+      try {
+        await captureThumbnail(fname);
+      } catch (e) {
+        console.warn('thumbnail capture failed for', fname, e);
+      }
+      thumbnailCapturingName = null;
+      thumbnailQueued.delete(fname);
+      if (thumbnailRecapture.delete(fname)) {
+        thumbnailQueued.add(fname);
+        thumbnailQueue.unshift(fname);
+      }
+    }
+    thumbnailCapturing = false;
+  }
 
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'width:800px;height:600px;border:none';
-    iframe.sandbox = 'allow-same-origin';
-    iframe.src = '/files/' + encodeURIComponent(fname);
-    container.appendChild(iframe);
+  function captureThumbnail(fname) {
+    const { width, height } = THUMBNAIL_VIEWPORT;
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.tabIndex = -1;
+    frame.style.cssText = 'position:fixed;left:-20000px;top:0;border:0;' +
+                          'width:' + width + 'px;height:' + height + 'px;pointer-events:none';
+    // Scripts run so charts and JS-built pages are captured as they look.
+    frame.sandbox = 'allow-scripts allow-same-origin';
+    frame.src = '/files/' + encodeURIComponent(fname) + '?capture=' + Date.now();
 
-    iframe.onload = () => {
-      setTimeout(async () => {
+    const done = new Promise((resolve, reject) => {
+      const giveUp = setTimeout(() => reject(new Error('timed out')), 20000);
+      frame.onload = async () => {
         try {
-          const doc = iframe.contentDocument || iframe.contentWindow.document;
-          const canvas = await html2canvas(doc.body, { width: 800, height: 600, scale: 0.5, backgroundColor: '#ffffff', logging: false });
-          const dataUrl = canvas.toDataURL('image/png');
-          await fetch('/thumb', {
+          const doc = frame.contentDocument;
+          if (doc.fonts && doc.fonts.ready) {
+            await Promise.race([doc.fonts.ready, new Promise(r => setTimeout(r, 3000))]);
+          }
+          await new Promise(r => setTimeout(r, 700));   // let scripts and entry animations settle
+          const bg = frame.contentWindow.getComputedStyle(doc.body).backgroundColor;
+          const dataUrl = await htmlToImage.toPng(doc.documentElement, {
+            width, height,
+            canvasWidth: width, canvasHeight: height,
+            pixelRatio: 1,
+            backgroundColor: (!bg || bg === 'rgba(0, 0, 0, 0)') ? '#ffffff' : bg,
+          });
+          const res = await fetch('/thumb', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ file: fname, data: dataUrl })
           });
-          const img = document.createElement('img');
-          img.style.cssText = 'width:100%;height:100%;object-fit:cover';
-          img.src = dataUrl;
-          previewEl.innerHTML = '';
-          previewEl.appendChild(img);
-        } catch(e) {}
-        container.remove();
-        thumbProcessing = false;
-        processThumbQueue();
-      }, 500);
-    };
-    iframe.onerror = () => {
-      container.remove();
-      thumbProcessing = false;
-      processThumbQueue();
-    };
+          if (!res.ok) throw new Error('save HTTP ' + res.status);
+          const { thumbnail_mtime } = await res.json();
+          thumbnailMtimeByName.set(fname, thumbnail_mtime);
+          showThumbnailOnCard(fname);
+          clearTimeout(giveUp);
+          resolve();
+        } catch (e) {
+          clearTimeout(giveUp);
+          reject(e);
+        }
+      };
+    });
+    document.body.appendChild(frame);
+    return done.finally(() => frame.remove());
+  }
+
+  // Swap the new capture into the existing card without rebuilding it.
+  function showThumbnailOnCard(fname) {
+    const cached = cardCache.get(fname);
+    if (!cached) return;
+    const preview = cached.el.querySelector('.card-preview');
+    if (!preview) return;
+    preview.innerHTML = '';
+    preview.appendChild(thumbnailImg(fname));
   }
 
   // ── Search ────────────────────────────────────────────────────────
@@ -1289,6 +1394,7 @@
       if (res.ok) {
         const data = await res.json();
         files = files.filter(f => !data.deleted.includes(f.name));
+        data.deleted.forEach(n => thumbnailMtimeByName.delete(n));
         const q = document.getElementById('search').value.trim();
         if (!q) filtered = [...files];
         else filtered = files.filter(f => fuzzyMatch(q, f.name));
@@ -1320,6 +1426,7 @@
 
     renderSidebar();
     renderPreview(f);
+    if (THUMBNAIL_EXT.includes(ext)) queueThumbnailCapture(f.name, true);
   }
 
   function goHome() {

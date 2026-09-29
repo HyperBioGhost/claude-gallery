@@ -88,7 +88,7 @@ def gallery(tmp_path, monkeypatch):
     root.mkdir()
     mod = _load_server()
     mod.ROOT = root
-    mod.THUMB_DIR = root / '.thumbnails'
+    mod.THUMBNAIL_DIR = root / '.card-thumbnails'
     mod.HISTORY_DIR = root / '.history'
     mod.INDEX_FILE = root / 'artifacts.json'
     mod.LOG_FILE = root / 'gallery.log'

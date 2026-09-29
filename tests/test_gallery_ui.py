@@ -158,6 +158,102 @@ def test_gallery_works_when_the_cdn_is_unreachable(gallery):
         browser.close()
 
 
+# ── stale card thumbnails ─────────────────────────────────────────────
+
+def _thumbnail_src(page, name):
+    return page.get_attribute(f'.card:has-text("{name}") img.card-thumbnail', 'src')
+
+
+def _wait_for_thumbnail(page, name, other_than=None, timeout=20000):
+    page.wait_for_function(
+        """([name, old]) => {
+            const card = [...document.querySelectorAll('.card')]
+                .find(c => c.querySelector('.card-name').textContent === name);
+            const img = card && card.querySelector('img.card-thumbnail');
+            return img && img.getAttribute('src') !== old;
+        }""", arg=[name, other_than], timeout=timeout)
+    return _thumbnail_src(page, name)
+
+
+def test_a_captured_card_reloads_as_an_image_not_a_page(gallery, page):
+    """The point of the feature: a restart must not re-render every document."""
+    gallery.write('page.html', TALL_HTML)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    stored = _wait_for_thumbnail(page, 'page.html')   # first sight captures it
+
+    page.reload(wait_until='domcontentloaded')
+    wait_for_app(page)
+    # Present immediately and it is the stored capture: an image that appears
+    # only after a fresh capture would mean the page was rendered again.
+    assert _thumbnail_src(page, 'page.html') == stored, 'card was re-captured on load'
+    assert page.locator('#grid iframe').count() == 0, 'grid rendered a live document'
+
+
+def test_thumbnail_stays_stale_until_the_artifact_is_opened(gallery, page):
+    gallery.write('page.html', TALL_HTML)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    first = _wait_for_thumbnail(page, 'page.html')
+
+    # The artifact changes on disk (as when Claude rewrites it): card stays put.
+    gallery.write('page.html', TALL_HTML.replace('ORIGINAL', 'REWRITTEN'))
+    page.wait_for_timeout(2500)
+    assert _thumbnail_src(page, 'page.html') == first, 'refreshed without being opened'
+
+    # Opening it is what refreshes the card, ready for when the user comes back.
+    page.click('.card:has-text("page.html")')
+    page.wait_for_selector('#detail-preview > iframe')
+    page.click('.back-btn')
+    refreshed = _wait_for_thumbnail(page, 'page.html', other_than=first)
+    assert refreshed != first
+
+
+def test_saving_an_edit_refreshes_the_thumbnail(gallery, page):
+    gallery.write('page.html', TALL_HTML)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    first = _wait_for_thumbnail(page, 'page.html')
+    open_editor(page, 'page.html')
+    page.fill('#editor-textarea', TALL_HTML.replace('ORIGINAL', 'EDITED'))
+    page.click('#save-btn')
+    page.click('.back-btn')
+    assert _wait_for_thumbnail(page, 'page.html', other_than=first) != first
+
+
+def test_saving_does_not_duplicate_the_card(gallery, page):
+    """
+    Regression: invalidateCard() dropped the cache entry but left the node in
+    the grid, so renderGrid appended a second card and every save showed the
+    file twice -- stale copy first.
+    """
+    gallery.write('doc.md', '# v1\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    open_editor(page, 'doc.md')
+    page.fill('#editor-textarea', '# v2\n')
+    page.click('#save-btn')
+    page.wait_for_selector('#undo-link')
+    page.click('.back-btn')
+    expect(page.locator('.card:visible:has-text("doc.md")')).to_have_count(1)
+
+
+def test_without_the_rasteriser_cards_fall_back_to_live_pages(gallery):
+    """CDN down: no capture is possible, so the old live preview must remain."""
+    gallery.write('page.html', TALL_HTML)
+    with sync_playwright() as pw:
+        try:
+            browser = getattr(pw, ENGINE).launch()
+        except Exception as e:
+            pytest.skip(f'{ENGINE} unavailable: {e}')
+        pg = browser.new_page()
+        pg.route('**/html-to-image**', lambda route: route.abort())
+        pg.goto(gallery.base, wait_until='domcontentloaded')
+        wait_for_app(pg)
+        expect(pg.locator('.card:has-text("page.html") iframe')).to_have_count(1)
+        browser.close()
+
+
 # ── preview ───────────────────────────────────────────────────────────
 
 def test_html_preview_renders_the_document(gallery, page):

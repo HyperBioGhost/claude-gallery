@@ -352,3 +352,55 @@ def test_actions_are_logged(gallery):
         h.flush()
     text = (gallery.root / 'gallery.log').read_text(encoding='utf-8')
     assert 'saved logged.md' in text
+
+
+# ── card thumbnails ───────────────────────────────────────────────────
+
+_PNG = ('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA'
+        'DUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')
+
+
+def test_list_reports_no_thumbnail_until_one_is_captured(gallery):
+    gallery.write('page.html', '<h1>x</h1>')
+    [entry] = gallery.get('/list')[1]['files']
+    assert entry['thumbnail_mtime'] is None
+    status, body = gallery.post('/thumb', {'file': 'page.html', 'data': _PNG})
+    assert status == 200 and body['thumbnail_mtime']
+    [entry] = gallery.get('/list')[1]['files']
+    assert entry['thumbnail_mtime'] == body['thumbnail_mtime']
+    assert gallery.get('/thumb/page.html.png')[0] == 200
+
+
+def test_thumbnail_is_not_touched_when_the_artifact_changes(gallery):
+    """Stale by design: only the browser, on open/save, replaces a thumbnail."""
+    gallery.write('page.html', '<h1>v1</h1>')
+    gallery.post('/thumb', {'file': 'page.html', 'data': _PNG})
+    before = gallery.get('/list')[1]['files'][0]['thumbnail_mtime']
+    time.sleep(0.05)
+    gallery.write('page.html', '<h1>v2</h1>')
+    assert gallery.get('/list')[1]['files'][0]['thumbnail_mtime'] == before
+
+
+@pytest.mark.parametrize('fname', ['missing.html', '../escape.html', 'gallery.html'])
+def test_thumbnail_upload_requires_a_real_artifact(gallery, fname):
+    status, _ = gallery.post('/thumb', {'file': fname, 'data': _PNG})
+    assert status in (400, 403)
+    assert not (gallery.root.parent / 'escape.html.png').exists()
+
+
+def test_thumbnail_download_refuses_to_escape_its_folder(gallery):
+    assert gallery.get_status('/thumb/..%2Fartifacts.json') == 404
+
+
+def test_deleting_an_artifact_deletes_its_thumbnail(gallery):
+    gallery.write('page.html', '<h1>x</h1>')
+    gallery.post('/thumb', {'file': 'page.html', 'data': _PNG})
+    assert (gallery.root / '.card-thumbnails' / 'page.html.png').exists()
+    gallery.post('/delete', {'files': ['page.html']})
+    assert not (gallery.root / '.card-thumbnails' / 'page.html.png').exists()
+
+
+def test_thumbnail_folder_is_not_listed_as_an_artifact(gallery):
+    gallery.write('page.html', '<h1>x</h1>')
+    gallery.post('/thumb', {'file': 'page.html', 'data': _PNG})
+    assert gallery.names() == ['page.html']
