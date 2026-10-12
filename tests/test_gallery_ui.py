@@ -443,6 +443,80 @@ def test_both_previews_share_one_sandbox_policy(gallery, page):
     assert 'allow-popups-to-escape-sandbox' in view
 
 
+# ── leaving an artifact stops it ──────────────────────────────────────
+
+NOISY_HTML = """<!doctype html><html><body>
+<h1 id="h">NOISY</h1><button id="go">start</button>
+<script>
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new Ctx();
+  document.getElementById("go").onclick = () => ctx.resume().then(() => {
+    const osc = ctx.createOscillator();
+    osc.connect(ctx.destination);
+    osc.start();
+  });
+  window.__audioState = () => ctx.state;
+</script></body></html>"""
+
+
+def test_going_back_ends_the_artifacts_document(gallery, page):
+    """
+    Regression: goHome() only removed the 'visible' class, so the artifact's
+    iframe stayed in the DOM and kept running -- audio carried on playing and
+    Chrome kept the tab's sound indicator lit on the homepage.
+    """
+    gallery.write('noisy.html', NOISY_HTML)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("noisy.html")')
+    page.wait_for_selector('#detail-preview > iframe')
+    page.frame_locator('#detail-preview > iframe').locator('#go').click()
+    page.wait_for_timeout(300)
+
+    page.click('.back-btn')
+    page.wait_for_timeout(500)
+    # No surviving document means nothing left to make sound.
+    assert page.locator('#detail-preview iframe').count() == 0
+    assert not [f for f in page.frames if 'noisy.html' in f.url and 'capture=' not in f.url]
+    # The editor must survive the teardown, or edit mode breaks afterwards.
+    assert page.locator('#editor-wrap').count() == 1
+
+
+def test_editing_still_works_after_a_back_and_forth(gallery, page):
+    """Tearing the preview down must not cost the editor its markup."""
+    gallery.write('doc.md', '# v1\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("doc.md")')
+    page.wait_for_selector('#detail-preview')
+    page.click('.back-btn')
+    open_editor(page, 'doc.md')
+    page.fill('#editor-textarea', '# v2\n')
+    page.click('#save-btn')
+    page.wait_for_selector('#undo-link', timeout=5000)
+    assert (gallery.root / 'doc.md').read_text(encoding='utf-8') == '# v2\n'
+
+
+def test_thumbnail_capture_is_not_allowed_to_autoplay(gallery, page):
+    """A capture is invisible, so it must also be inaudible."""
+    gallery.write('noisy.html', NOISY_HTML)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    # Watch first, then ask for a capture: the card's own first capture can
+    # finish before the observer is installed, which makes this race.
+    allow = page.evaluate("""() => new Promise(resolve => {
+        const seen = new MutationObserver(() => {
+            const f = [...document.querySelectorAll('iframe')]
+                .find(i => i.src.includes('capture='));
+            if (f) { seen.disconnect(); resolve(f.getAttribute('allow')); }
+        });
+        seen.observe(document.body, { childList: true });
+        queueThumbnailCapture('noisy.html', true);
+        setTimeout(() => { seen.disconnect(); resolve('no capture frame seen'); }, 20000);
+    })""")
+    assert allow == "autoplay 'none'", f'capture frame allow={allow!r}'
+
+
 # ── save + undo ───────────────────────────────────────────────────────
 
 def test_save_then_undo_restores_the_file(gallery, page):

@@ -1310,6 +1310,10 @@
                           'width:' + width + 'px;height:' + height + 'px;pointer-events:none';
     // Scripts run so charts and JS-built pages are captured as they look.
     frame.sandbox = 'allow-scripts allow-same-origin';
+    // ...but a capture is invisible, so it must never be audible. Same-origin
+    // frames inherit autoplay permission once the user has clicked anything,
+    // so an artifact with sound would blip while being captured.
+    frame.allow = "autoplay 'none'";
     frame.src = '/files/' + encodeURIComponent(fname) + '?capture=' + Date.now();
 
     const done = new Promise((resolve, reject) => {
@@ -1429,8 +1433,20 @@
     if (THUMBNAIL_EXT.includes(ext)) queueThumbnailCapture(f.name, true);
   }
 
+  // Hiding the detail view leaves the artifact's document running: audio and
+  // video keep playing, timers and animations keep burning CPU, and the tab
+  // keeps its "playing sound" indicator. Removing the iframe ends the realm.
+  // openDetail() always re-renders, so there is nothing worth keeping alive.
+  function clearDetailPreview() {
+    const area = document.getElementById('detail-preview');
+    const editorWrap = document.getElementById('editor-wrap');
+    area.innerHTML = '';
+    area.appendChild(editorWrap);
+  }
+
   function goHome() {
     cancelEdit();
+    clearDetailPreview();
     document.getElementById('detail-view').classList.remove('visible');
     document.getElementById('homepage').classList.remove('hidden');
     document.getElementById('detail-sidebar').classList.remove('visible');
