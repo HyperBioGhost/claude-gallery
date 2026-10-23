@@ -443,6 +443,142 @@ def test_both_previews_share_one_sandbox_policy(gallery, page):
     assert 'allow-popups-to-escape-sandbox' in view
 
 
+# ── preview toggle ────────────────────────────────────────────────────
+
+MD_DOC = """Prose line one, long enough to wrap in a capped reading measure so the
+column width actually matters to the reader.
+
+| # | What | Proposed |
+|---|---|---|
+| 1 | score weights | ROAS 40% |
+"""
+
+
+def gutters(page):
+    """Left and right space around the reading column, inside its own pane."""
+    return page.evaluate("""() => {
+        const md = document.querySelector('.md-rendered');
+        const half = md.closest('.split-half');
+        const a = md.getBoundingClientRect(), b = half.getBoundingClientRect();
+        return { left: Math.round(a.left - b.left), right: Math.round(b.right - a.right),
+                 colWidth: Math.round(a.width), paneWidth: Math.round(b.width) };
+    }""")
+
+
+def open_md(gallery, page, name='doc.md', body=None):
+    gallery.write(name, body if body is not None else MD_DOC)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click(f'.card:has-text("{name}")')
+    page.wait_for_selector('.split-pane .md-rendered')
+
+
+def test_preview_button_shows_only_for_split_types(gallery, page):
+    """html renders whole; there is no source side to put away."""
+    gallery.write('doc.md', MD_DOC)
+    gallery.write('page.html', TALL_HTML)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+
+    page.click('.card:has-text("page.html")')
+    page.wait_for_selector('#detail-preview > iframe')
+    assert page.locator('#preview-btn').is_hidden()
+
+    page.click('.back-btn')
+    page.click('.card:has-text("doc.md")')
+    page.wait_for_selector('.split-pane .md-rendered')
+    expect(page.locator('#preview-btn')).to_be_visible()
+    assert page.locator('#preview-btn').inner_text() == 'Preview'
+
+
+def test_preview_hides_the_source_and_centres_the_rendering(gallery, page):
+    open_md(gallery, page)
+    assert page.locator('.split-half').first.evaluate('el => el.offsetWidth') > 0
+
+    page.click('#preview-btn')
+    page.wait_for_timeout(200)
+
+    # Source side, divider and the SOURCE/RENDERED labels all go away.
+    assert page.locator('.split-half').first.evaluate('el => el.offsetWidth') == 0
+    assert page.locator('.divider').first.evaluate('el => el.offsetWidth') == 0
+    assert page.locator('.split-label').first.evaluate('el => el.offsetParent') is None
+    expect(page.locator('.md-rendered')).to_be_visible()
+
+    g = gutters(page)
+    assert abs(g['left'] - g['right']) <= 2, f'not centred: {g}'
+    assert g['left'] > 40, f'no breathing room: {g}'
+    assert g['colWidth'] < g['paneWidth'], f'column not capped: {g}'
+    assert page.locator('#preview-btn').inner_text() == 'Split'
+
+
+def test_preview_reading_size_meets_the_type_floor(gallery, page):
+    """Split is a comparison view; preview is for reading, so it gets 18px."""
+    open_md(gallery, page)
+    size = page.evaluate(
+        "() => parseFloat(getComputedStyle(document.querySelector('.md-rendered')).fontSize)")
+    assert size >= 16, f'split body {size}px'
+    page.click('#preview-btn')
+    page.wait_for_timeout(200)
+    size = page.evaluate(
+        "() => parseFloat(getComputedStyle(document.querySelector('.md-rendered')).fontSize)")
+    assert size >= 18, f'preview body {size}px'
+
+
+def test_preview_toggles_back_to_split(gallery, page):
+    open_md(gallery, page)
+    page.click('#preview-btn')
+    page.wait_for_timeout(150)
+    page.click('#preview-btn')
+    page.wait_for_timeout(150)
+    assert page.locator('.split-half').first.evaluate('el => el.offsetWidth') > 0
+    assert page.locator('#preview-btn').inner_text() == 'Preview'
+
+
+def test_preview_is_remembered_for_the_next_file(gallery, page):
+    """A reading preference, not a per-file setting."""
+    gallery.write('one.md', MD_DOC)
+    gallery.write('two.md', MD_DOC)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("one.md")')
+    page.wait_for_selector('.split-pane .md-rendered')
+    page.click('#preview-btn')
+    page.wait_for_timeout(150)
+    page.click('.back-btn')
+
+    page.click('.card:has-text("two.md")')
+    page.wait_for_selector('.split-pane .md-rendered')
+    assert page.locator('.split-pane').evaluate(
+        "el => el.classList.contains('preview-only')"), 'preference not carried over'
+    assert page.locator('#preview-btn').inner_text() == 'Split'
+
+
+def test_preview_button_is_absent_while_editing(gallery, page):
+    """The editor covers the view pane, so the toggle has nothing to act on."""
+    open_md(gallery, page)
+    page.click('#edit-btn')
+    page.wait_for_selector('#editor-textarea')
+    assert page.locator('#preview-btn').is_hidden()
+    page.keyboard.press('Escape')
+    page.wait_for_timeout(200)
+    expect(page.locator('#preview-btn')).to_be_visible()
+
+
+def test_preview_keeps_tables_wider_than_the_prose_cap_would_allow(gallery, page):
+    """Prose caps its measure; a table is a data surface and fills the column."""
+    open_md(gallery, page)
+    page.click('#preview-btn')
+    page.wait_for_timeout(200)
+    m = page.evaluate("""() => {
+        const md = document.querySelector('.md-rendered');
+        const t = md.querySelector('table');
+        return { table: Math.round(t.getBoundingClientRect().width),
+                 column: Math.round(md.getBoundingClientRect().width) };
+    }""")
+    # Fills the column rather than being squeezed to a prose measure.
+    assert m['table'] > m['column'] * 0.8, m
+
+
 # ── leaving an artifact stops it ──────────────────────────────────────
 
 NOISY_HTML = """<!doctype html><html><body>

@@ -590,6 +590,25 @@
   }
   .split-scroll { flex: 1; overflow: auto; }
 
+  /* Preview: the source side leaves rather than shrinks, and what remains is
+     read as a document. The pane still fills the frame; the prose caps its own
+     measure at 72ch and centres, while tables keep the column's full width. */
+  .split-pane.preview-only > .split-half:first-child,
+  .split-pane.preview-only > .divider { display: none; }
+  .split-pane.preview-only > .split-half:last-child { flex: 1 1 100%; }
+  .split-pane.preview-only .split-label { display: none; }
+  .split-pane.preview-only .split-scroll { background: var(--paper); }
+  .split-pane.preview-only .md-rendered {
+    font-size: 18px;
+    max-width: 72ch;
+    margin: 0 auto;
+    padding: 64px clamp(20px, 4vw, 48px) 120px;
+  }
+  /* A pretty-printed JSON or a diagram is not prose, so it gets room instead
+     of a reading measure. */
+  .split-pane.preview-only .code-block,
+  .split-pane.preview-only .mermaid-stage { max-width: none; }
+
   /* Divider */
   .divider {
     width: 5px;
@@ -621,7 +640,7 @@
     padding: 28px 32px;
     color: var(--ink);
     line-height: 1.75;
-    font-size: 14px;
+    font-size: 16px;
   }
   .md-rendered h1, .md-rendered h2, .md-rendered h3,
   .md-rendered h4, .md-rendered h5, .md-rendered h6 {
@@ -630,9 +649,9 @@
     font-weight: 600;
     font-family: var(--serif);
   }
-  .md-rendered h1 { font-size: 1.6rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
-  .md-rendered h2 { font-size: 1.3rem; }
-  .md-rendered h3 { font-size: 1.1rem; }
+  .md-rendered h1 { font-size: 1.6em; border-bottom: 1px solid var(--rule); padding-bottom: 0.3em; }
+  .md-rendered h2 { font-size: 1.3em; }
+  .md-rendered h3 { font-size: 1.1em; }
   .md-rendered p { margin: 0.6em 0; }
   .md-rendered strong { color: var(--ink); }
   .md-rendered em { color: var(--ink-soft); }
@@ -657,7 +676,7 @@
   .md-rendered a:hover { text-decoration: underline; }
   .md-rendered ul, .md-rendered ol { padding-left: 1.6em; margin: 0.5em 0; }
   .md-rendered li { margin: 0.3em 0; }
-  .md-rendered table { border-collapse: collapse; width: 100%; margin: 0.8em 0; font-size: 0.88rem; }
+  .md-rendered table { border-collapse: collapse; width: 100%; margin: 0.8em 0; font-size: 0.9em; }
   .md-rendered th { background: var(--paper-warm); color: var(--ink); padding: 8px 12px; text-align: left; border-bottom: 2px solid var(--rule); font-weight: 600; }
   .md-rendered td { padding: 7px 12px; border-bottom: 1px solid var(--rule); }
   .md-rendered blockquote { border-left: 3px solid var(--accent); padding: 4px 14px; color: var(--ink-soft); margin: 0.8em 0; background: var(--paper-warm); border-radius: 0 6px 6px 0; }
@@ -764,6 +783,7 @@
     <button class="hamburger" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
     <span class="detail-filename" id="detail-filename"></span>
     <span class="save-status" id="save-status"></span>
+    <button class="toolbar-btn" id="preview-btn" onclick="togglePreviewOnly()" style="display:none">Preview</button>
     <button class="toolbar-btn" id="edit-btn" onclick="toggleEdit()" style="display:none">Edit</button>
     <button class="toolbar-btn primary" id="save-btn" onclick="saveEdit()" style="display:none">Save</button>
     <button class="toolbar-btn" id="saveas-btn" onclick="saveAs()">Save As</button>
@@ -900,6 +920,12 @@
   let selectMode = false;
   let editMode = false;
   let livePreviewExt = null;
+  // Reading preference, not a per-file setting: someone who wants the rendered
+  // side alone wants it for the next file too. Resets on reload.
+  let previewOnly = false;
+  // Types whose view mode is a source|rendered split, so there is a rendered
+  // side to show on its own.
+  const SPLIT_PREVIEW_EXT = ['md', 'json', 'mermaid', 'mmd'];
   let undoTimer = null;          // how long the post-save Undo stays offered
   let livePreviewTimer = null;   // debounce for iframe-rendered previews
   let livePreviewUrl = null;     // blob URL currently loaded in the preview iframe
@@ -1029,6 +1055,9 @@
   function makeSplitPane(leftLabel, leftEl, rightLabel, rightEl, sync) {
     const pane = document.createElement('div');
     pane.className = 'split-pane';
+    // The pane is built inside a fetch, so the preference is read here rather
+    // than applied by whoever opened the file.
+    if (previewOnly) pane.classList.add('preview-only');
 
     const left = document.createElement('div');
     left.className = 'split-half';
@@ -1428,6 +1457,7 @@
     exportWrap.style.display = getExportOptions(ext).length > 0 ? '' : 'none';
     document.getElementById('export-menu').classList.remove('visible');
 
+    syncPreviewButton();
     renderSidebar();
     renderPreview(f);
     if (THUMBNAIL_EXT.includes(ext)) queueThumbnailCapture(f.name, true);
@@ -1442,6 +1472,24 @@
     const editorWrap = document.getElementById('editor-wrap');
     area.innerHTML = '';
     area.appendChild(editorWrap);
+  }
+
+  // Toggling is a class swap on the live pane: re-rendering would re-parse the
+  // markdown and throw away the reader's scroll position.
+  function togglePreviewOnly() {
+    previewOnly = !previewOnly;
+    const pane = document.querySelector('#detail-preview .split-pane');
+    if (pane) pane.classList.toggle('preview-only', previewOnly);
+    syncPreviewButton();
+  }
+
+  function syncPreviewButton() {
+    const btn = document.getElementById('preview-btn');
+    const splittable = activeFile && SPLIT_PREVIEW_EXT.includes(getExt(activeFile.name));
+    btn.style.display = splittable && !editMode ? '' : 'none';
+    // The label names where the click goes, not where you are.
+    btn.textContent = previewOnly ? 'Split' : 'Preview';
+    btn.classList.toggle('active', previewOnly);
   }
 
   function goHome() {
@@ -1672,6 +1720,7 @@
       editBtn.classList.add('active');
       editBtn.textContent = 'Cancel';
       document.getElementById('save-btn').style.display = '';
+      syncPreviewButton();
       ta.focus();
     });
   }
@@ -1687,6 +1736,7 @@
     editBtn.classList.remove('active');
     editBtn.textContent = 'Edit';
     editMode = false;
+    syncPreviewButton();
     livePreviewExt = null;
     // Drop the pending re-render and release the blob, or the URL leaks for the
     // lifetime of the tab every time an HTML file is edited.
