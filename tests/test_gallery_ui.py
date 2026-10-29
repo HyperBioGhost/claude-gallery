@@ -630,6 +630,183 @@ def test_grouping_never_relocates_a_card(gallery, page):
     assert before == after, 'cards were reordered in the DOM, not by CSS'
 
 
+# ── folding groups ────────────────────────────────────────────────────
+
+def grouped_by_type(gallery, page):
+    seed_mixed(gallery, page)
+    page.select_option('#group-select', 'ext')
+    page.wait_for_timeout(300)
+
+
+def visible_cards_of(page, ext):
+    return page.evaluate("""(ext) => [...document.querySelectorAll('.card')]
+        .filter(c => c.offsetParent !== null && c.offsetWidth > 0)
+        .map(c => c.querySelector('.card-name').textContent)
+        .filter(n => n.endsWith('.' + ext)).length""", ext)
+
+
+def header_for(page, key):
+    return page.locator(f'.group-header[data-group="{key}"]')
+
+
+def test_group_header_is_a_real_button(gallery, page):
+    """Enter and Space must work, and the state must be announced."""
+    grouped_by_type(gallery, page)
+    h = header_for(page, 'html')
+    assert h.evaluate('el => el.tagName') == 'BUTTON'
+    assert h.get_attribute('aria-expanded') == 'true'
+    assert 'Collapse' in h.get_attribute('aria-label')
+    assert h.locator('.group-caret').count() == 1
+
+
+def test_folding_a_group_hides_only_its_own_cards(gallery, page):
+    grouped_by_type(gallery, page)
+    assert visible_cards_of(page, 'html') == 3
+    assert visible_cards_of(page, 'md') == 2
+
+    header_for(page, 'html').click()
+    page.wait_for_timeout(250)
+
+    assert visible_cards_of(page, 'html') == 0
+    assert visible_cards_of(page, 'md') == 2, 'folding leaked into another group'
+    # The header stays, so the group can be opened again and still reads its size.
+    expect(header_for(page, 'html')).to_be_visible()
+    assert header_for(page, 'html').get_attribute('aria-expanded') == 'false'
+    assert 'Expand' in header_for(page, 'html').get_attribute('aria-label')
+    assert '3 items' in header_for(page, 'html').inner_text()
+
+
+def test_folding_is_reversible(gallery, page):
+    grouped_by_type(gallery, page)
+    header_for(page, 'html').click()
+    page.wait_for_timeout(200)
+    header_for(page, 'html').click()
+    page.wait_for_timeout(200)
+    assert visible_cards_of(page, 'html') == 3
+    assert header_for(page, 'html').get_attribute('aria-expanded') == 'true'
+
+
+def test_a_group_folds_from_the_keyboard(gallery, page):
+    grouped_by_type(gallery, page)
+    header_for(page, 'html').focus()
+    page.keyboard.press('Enter')
+    page.wait_for_timeout(250)
+    assert visible_cards_of(page, 'html') == 0
+
+
+def test_folding_is_not_filtering(gallery, page):
+    """
+    Counts describe the collection, not the viewport, so folding must leave
+    them alone -- and re-deriving them must give the same answer, which is
+    what catches a count rebuilt from the visible cards.
+    """
+    grouped_by_type(gallery, page)
+    before_count = page.locator('#file-count').inner_text()
+    before_chips = {c['ext']: c['count'] for c in chips(page)}
+
+    header_for(page, 'html').click()
+    page.wait_for_timeout(250)
+    assert page.locator('#file-count').inner_text() == before_count
+    assert {c['ext']: c['count'] for c in chips(page)} == before_chips
+
+    # Force the counts to be produced again while a group is folded.
+    page.evaluate('applyFilters()')
+    page.wait_for_timeout(150)
+    assert page.locator('#file-count').inner_text() == before_count, \
+        'counts were rebuilt from the visible cards'
+    assert {c['ext']: c['count'] for c in chips(page)} == before_chips
+    assert visible_cards_of(page, 'html') == 0, 'fold lost on recount'
+
+
+def test_fold_state_is_scoped_to_the_grouping_mode(gallery, page):
+    """
+    A type group and a date group can share a key: `notes.today` yields the
+    extension key 'today', which is also the key of the Today date group.
+    The fold key carries its mode so one cannot fold the other.
+    """
+    gallery.write('notes.today', 'x')
+    gallery.write('page-1.html', TALL_HTML)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.select_option('#group-select', 'ext')
+    page.wait_for_timeout(300)
+
+    header_for(page, 'today').click()          # fold the .today type group
+    page.wait_for_timeout(200)
+    assert header_for(page, 'today').get_attribute('aria-expanded') == 'false'
+
+    page.select_option('#group-select', 'date')
+    page.wait_for_timeout(300)
+    # Same key, different dimension: Today holds both files and must be open.
+    assert header_for(page, 'today').get_attribute('aria-expanded') == 'true', \
+        'the Today date group inherited the .today type fold'
+    assert page.evaluate("""() => [...document.querySelectorAll('.card')]
+        .filter(c => c.offsetParent !== null && c.offsetWidth > 0).length""") == 2
+
+    page.select_option('#group-select', 'ext')
+    page.wait_for_timeout(300)
+    assert header_for(page, 'today').get_attribute('aria-expanded') == 'false'
+
+
+def test_turning_grouping_off_strands_no_cards(gallery, page):
+    """A fold must never leave a card hidden once the headers are gone."""
+    grouped_by_type(gallery, page)
+    header_for(page, 'html').click()
+    page.wait_for_timeout(200)
+    page.select_option('#group-select', 'none')
+    page.wait_for_timeout(300)
+    total = page.evaluate("""() => [...document.querySelectorAll('.card')]
+        .filter(c => c.offsetParent !== null && c.offsetWidth > 0).length""")
+    assert total == 6, total
+
+
+def test_folding_never_relocates_a_card(gallery, page):
+    grouped_by_type(gallery, page)
+    before = page.evaluate(
+        "() => [...document.getElementById('grid').children]"
+        ".filter(e => e.classList.contains('card'))"
+        ".map(e => e.querySelector('.card-name').textContent)")
+    header_for(page, 'html').click()
+    page.wait_for_timeout(200)
+    header_for(page, 'md').click()
+    page.wait_for_timeout(200)
+    after = page.evaluate(
+        "() => [...document.getElementById('grid').children]"
+        ".filter(e => e.classList.contains('card'))"
+        ".map(e => e.querySelector('.card-name').textContent)")
+    assert before == after, 'cards were reordered in the DOM, not by CSS'
+
+
+def test_caret_turns_and_respects_reduced_motion(gallery, page):
+    grouped_by_type(gallery, page)
+    caret = page.locator('.group-header[data-group="html"] .group-caret')
+    open_t = caret.evaluate('el => getComputedStyle(el).transform')
+    header_for(page, 'html').click()
+    page.wait_for_timeout(350)
+    assert caret.evaluate('el => getComputedStyle(el).transform') != open_t
+
+    page.emulate_media(reduced_motion='reduce')
+    page.wait_for_timeout(100)
+    assert caret.evaluate(
+        "el => getComputedStyle(el).transitionDuration") in ('0s', '0ms')
+    page.emulate_media(reduced_motion='no-preference')
+
+
+def test_every_group_can_be_folded_at_once(gallery, page):
+    """All folded is a legal state: headers only, and not an empty-state."""
+    grouped_by_type(gallery, page)
+    for key in ('html', 'md', 'csv'):
+        header_for(page, key).click()
+        page.wait_for_timeout(120)
+    shown = page.evaluate("""() => ({
+        cards: [...document.querySelectorAll('.card')]
+                 .filter(c => c.offsetParent !== null && c.offsetWidth > 0).length,
+        headers: [...document.querySelectorAll('.group-header')]
+                   .filter(h => h.offsetParent !== null).length,
+        empty: document.getElementById('grid-empty').offsetParent !== null })""")
+    assert shown == {'cards': 0, 'headers': 3, 'empty': False}, shown
+
+
 # ── preview toggle ────────────────────────────────────────────────────
 
 MD_DOC = """Prose line one, long enough to wrap in a capped reading measure so the

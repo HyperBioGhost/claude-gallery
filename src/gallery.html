@@ -149,8 +149,38 @@
     padding-bottom: 6px;
     border-bottom: 1px solid var(--rule);
     margin-top: 8px;
+    /* It is a <button>, so undo the control look and keep the heading's. */
+    width: 100%;
+    background: none;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    padding-left: 0;
+    padding-right: 0;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
   }
   .group-header:first-of-type { margin-top: 0; }
+  .group-header:hover .group-name { color: var(--accent); }
+  .group-header:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+  .group-caret {
+    font-size: 11px;
+    line-height: 1;
+    color: var(--ink-faint);
+    transform: rotate(0deg);
+    transition: transform 0.15s;
+  }
+  /* Folded points right, the way a closed folder does. */
+  .group-header[aria-expanded="false"] .group-caret { transform: rotate(-90deg); }
+  .group-header[aria-expanded="false"] { opacity: 0.75; }
+  @media (prefers-reduced-motion: reduce) {
+    .group-caret { transition: none; }
+  }
   .group-header .group-name {
     font-family: var(--serif);
     font-size: 20px;
@@ -994,6 +1024,7 @@
   let groupBy = 'none';              // 'none' | 'ext' | 'date'
   let countByExt = new Map();        // extension -> matches within the current search
   const groupHeaderByKey = new Map();
+  const foldedGroups = new Set();    // '<mode>:<group key>'
   let selectMode = false;
   let editMode = false;
   let livePreviewExt = null;
@@ -1361,6 +1392,16 @@
     ['older', 'Older', Infinity],
   ];
 
+  function foldKey(key) { return groupBy + ':' + key; }
+
+  function isFolded(key) { return foldedGroups.has(foldKey(key)); }
+
+  function toggleGroupFold(key) {
+    const k = foldKey(key);
+    foldedGroups.has(k) ? foldedGroups.delete(k) : foldedGroups.add(k);
+    renderGrid();
+  }
+
   function groupKeyOf(f) {
     if (groupBy === 'ext') return getExt(f.name) || '(none)';
     const days = (Date.now() - f.mtime) / 86400000;
@@ -1385,16 +1426,25 @@
   function groupHeader(key, count, grid) {
     let el = groupHeaderByKey.get(key);
     if (!el) {
-      el = document.createElement('div');
+      // A real button, so Enter and Space work and the state is announced.
+      el = document.createElement('button');
+      el.type = 'button';
       el.className = 'group-header';
       el.dataset.group = key;
-      el.innerHTML = '<span class="group-name"></span><span class="group-count"></span>';
+      el.innerHTML = '<span class="group-caret" aria-hidden="true">&#9662;</span>' +
+                     '<span class="group-name"></span><span class="group-count"></span>';
+      el.onclick = () => toggleGroupFold(el.dataset.group);
       groupHeaderByKey.set(key, el);
     }
     if (el.parentNode !== grid) grid.appendChild(el);
     el.querySelector('.group-name').textContent = groupLabelOf(key);
     el.querySelector('.group-count').textContent =
       count + ' item' + (count !== 1 ? 's' : '');
+    const open = !isFolded(key);
+    el.setAttribute('aria-expanded', open ? 'true' : 'false');
+    el.setAttribute('aria-label',
+      (open ? 'Collapse ' : 'Expand ') + groupLabelOf(key) + ', ' + count +
+      ' item' + (count !== 1 ? 's' : ''));
     return el;
   }
 
@@ -1447,7 +1497,13 @@
         header.style.display = '';
         header.style.order = seat++;
         liveGroups.add(k);
-        members.get(k).forEach(f => rank.set(f.name, seat++));
+        // Folding hides the members; it never removes them from the set, so the
+        // counts and the filter still describe the whole collection.
+        if (isFolded(k)) {
+          members.get(k).forEach(f => rank.delete(f.name));
+        } else {
+          members.get(k).forEach(f => rank.set(f.name, seat++));
+        }
       }
     }
     groupHeaderByKey.forEach((el, k) => {
