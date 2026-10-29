@@ -443,6 +443,193 @@ def test_both_previews_share_one_sandbox_policy(gallery, page):
     assert 'allow-popups-to-escape-sandbox' in view
 
 
+# ── filter chips and grouping ─────────────────────────────────────────
+
+def seed_mixed(gallery, page):
+    """A mix shaped like the real collection: one dominant type plus singles."""
+    for i in range(1, 4):
+        gallery.write(f'page-{i}.html', TALL_HTML)
+    for i in range(1, 3):
+        gallery.write(f'note-{i}.md', '# note\n')
+    gallery.write('data.csv', 'a,b\n1,2\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.wait_for_function("() => document.querySelectorAll('.type-chip').length > 1")
+
+
+def chips(page):
+    return page.evaluate("""() => [...document.querySelectorAll('.type-chip')].map(c => ({
+        ext: c.dataset.ext, count: +c.querySelector('.chip-count').textContent,
+        active: c.classList.contains('active'), disabled: c.disabled }))""")
+
+
+def visual_sequence(page):
+    """What the reader sees, read from `order` rather than DOM position."""
+    return page.evaluate("""() => {
+        const vis = el => el.offsetParent !== null && el.offsetWidth > 0;
+        const items = [];
+        document.querySelectorAll('.card').forEach(c => { if (vis(c))
+            items.push({ o: +c.style.order, t: c.querySelector('.card-name').textContent }); });
+        document.querySelectorAll('.group-header').forEach(h => { if (vis(h))
+            items.push({ o: +h.style.order, t: '## ' + h.querySelector('.group-name').textContent }); });
+        return items.sort((a, b) => a.o - b.o).map(x => x.t);
+    }""")
+
+
+def test_chips_come_from_the_types_actually_present(gallery, page):
+    seed_mixed(gallery, page)
+    c = chips(page)
+    assert [x['ext'] for x in c] == ['', 'html', 'md', 'csv'], c   # All, then size desc
+    by = {x['ext']: x['count'] for x in c}
+    assert by == {'': 6, 'html': 3, 'md': 2, 'csv': 1}, by
+    assert c[0]['active'], 'All should start selected'
+
+
+def test_clicking_a_chip_filters_to_that_type(gallery, page):
+    seed_mixed(gallery, page)
+    page.click('.type-chip[data-ext="md"]')
+    page.wait_for_timeout(200)
+    names = visual_sequence(page)
+    assert names and all(n.endswith('.md') for n in names), names
+    assert '2 of 6 artifacts' in page.locator('#file-count').inner_text()
+
+
+def test_clicking_the_active_chip_clears_the_filter(gallery, page):
+    seed_mixed(gallery, page)
+    page.click('.type-chip[data-ext="md"]')
+    page.wait_for_timeout(150)
+    page.click('.type-chip[data-ext="md"]')
+    page.wait_for_timeout(150)
+    assert len(visual_sequence(page)) == 6
+    assert chips(page)[0]['active']
+
+
+def test_chip_counts_follow_the_search(gallery, page):
+    """A chip claiming 3 when the search can reach 1 would be a lie."""
+    seed_mixed(gallery, page)
+    page.fill('#search', 'note')
+    page.wait_for_timeout(300)
+    by = {x['ext']: x for x in chips(page)}
+    assert by['md']['count'] == 2, by
+    assert by['html']['count'] == 0 and by['html']['disabled'], by['html']
+    assert by['']['count'] == 2, by['']
+
+
+def test_the_active_chip_stays_clickable_at_zero(gallery, page):
+    """Otherwise a search could strand the filter with no way to switch it off."""
+    seed_mixed(gallery, page)
+    page.click('.type-chip[data-ext="csv"]')
+    page.wait_for_timeout(150)
+    page.fill('#search', 'page-')
+    page.wait_for_timeout(300)
+    csv = [x for x in chips(page) if x['ext'] == 'csv'][0]
+    assert csv['count'] == 0 and csv['active'] and not csv['disabled'], csv
+    page.click('.type-chip[data-ext="csv"]')
+    page.wait_for_timeout(200)
+    assert len(visual_sequence(page)) == 3
+
+
+def test_group_by_type_puts_each_card_under_its_header(gallery, page):
+    seed_mixed(gallery, page)
+    page.select_option('#group-select', 'ext')
+    page.wait_for_timeout(300)
+    seq = visual_sequence(page)
+    assert seq[0] == '## .html', seq
+    current = None
+    seen = []
+    for item in seq:
+        if item.startswith('## '):
+            current = item[3:]
+            seen.append(current)
+        else:
+            assert item.endswith(current), f'{item} filed under {current}'
+    assert seen == ['.html', '.md', '.csv'], seen   # biggest group first
+
+
+def test_a_group_header_spans_the_whole_row(gallery, page):
+    seed_mixed(gallery, page)
+    page.select_option('#group-select', 'ext')
+    page.wait_for_timeout(250)
+    m = page.evaluate("""() => {
+        const h = document.querySelector('.group-header');
+        const cs = getComputedStyle(h);
+        const grid = document.getElementById('grid');
+        return { start: cs.gridColumnStart, end: cs.gridColumnEnd,
+                 headerW: Math.round(h.getBoundingClientRect().width),
+                 gridW: Math.round(grid.getBoundingClientRect().width) };
+    }""")
+    assert m['start'] == '1' and m['end'] == '-1', m
+    assert m['headerW'] >= m['gridW'] - 2, m
+
+
+def test_group_by_date_buckets_by_age(gallery, page):
+    import os, time
+    ages = {'fresh.md': 0, 'midweek.md': 3, 'lastmonth.md': 20, 'ancient.md': 200}
+    for name, days in ages.items():
+        f = gallery.write(name, '# x\n')
+        when = time.time() - days * 86400
+        os.utime(f, (when, when))
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.select_option('#group-select', 'date')
+    page.wait_for_timeout(300)
+    seq = visual_sequence(page)
+    assert seq == ['## Today', 'fresh.md', '## This week', 'midweek.md',
+                   '## This month', 'lastmonth.md', '## Older', 'ancient.md'], seq
+
+
+def test_grouping_off_shows_no_headers(gallery, page):
+    seed_mixed(gallery, page)
+    page.select_option('#group-select', 'ext')
+    page.wait_for_timeout(200)
+    page.select_option('#group-select', 'none')
+    page.wait_for_timeout(200)
+    assert not any(x.startswith('## ') for x in visual_sequence(page))
+
+
+def test_filter_and_grouping_compose(gallery, page):
+    seed_mixed(gallery, page)
+    page.click('.type-chip[data-ext="html"]')
+    page.select_option('#group-select', 'ext')
+    page.wait_for_timeout(300)
+    seq = visual_sequence(page)
+    assert seq[0] == '## .html', seq
+    assert sum(1 for x in seq if x.startswith('## ')) == 1, seq
+    assert all(x.endswith('.html') for x in seq[1:]), seq
+
+
+def test_empty_state_names_the_constraint(gallery, page):
+    seed_mixed(gallery, page)
+    page.click('.type-chip[data-ext="md"]')
+    page.fill('#search', 'zzz-nothing')
+    page.wait_for_timeout(300)
+    msg = page.locator('#grid-empty .msg').inner_text()
+    assert '.md' in msg and 'zzz-nothing' in msg, msg
+
+
+def test_grouping_never_relocates_a_card(gallery, page):
+    """
+    Cards are ordered by CSS precisely so they are never detached: moving one
+    reloads its thumbnail, and its iframe in the no-CDN fallback.
+    """
+    seed_mixed(gallery, page)
+    before = page.evaluate(
+        "() => [...document.getElementById('grid').children]"
+        ".filter(e => e.classList.contains('card'))"
+        ".map(e => e.querySelector('.card-name').textContent)")
+    page.select_option('#group-select', 'ext')
+    page.wait_for_timeout(250)
+    page.click('.type-chip[data-ext="md"]')
+    page.wait_for_timeout(250)
+    page.select_option('#group-select', 'date')
+    page.wait_for_timeout(250)
+    after = page.evaluate(
+        "() => [...document.getElementById('grid').children]"
+        ".filter(e => e.classList.contains('card'))"
+        ".map(e => e.querySelector('.card-name').textContent)")
+    assert before == after, 'cards were reordered in the DOM, not by CSS'
+
+
 # ── preview toggle ────────────────────────────────────────────────────
 
 MD_DOC = """Prose line one, long enough to wrap in a capped reading measure so the

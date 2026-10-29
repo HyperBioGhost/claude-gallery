@@ -84,14 +84,6 @@
     box-shadow: 0 0 0 3px oklch(58% 0.19 28 / 0.1);
   }
   #search::placeholder { color: var(--ink-faint); }
-  .search-count {
-    font-size: 12px;
-    color: var(--ink-faint);
-    position: absolute;
-    right: 16px;
-    top: 50%;
-    transform: translateY(-50%);
-  }
 
   /* Grid */
   .grid-wrap {
@@ -101,6 +93,75 @@
     padding: 0 56px 80px;
     width: 100%;
   }
+  /* Filter chips + grouping */
+  .browse-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+  }
+  .type-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .type-chip {
+    font-family: var(--sans);
+    font-size: 13px;
+    padding: 5px 12px;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    background: white;
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .type-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .type-chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .type-chip:disabled { opacity: 0.4; cursor: default; }
+  .type-chip .chip-count {
+    font-family: var(--mono);
+    font-size: 12px;
+    opacity: 0.75;
+    margin-left: 6px;
+  }
+  .group-wrap { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+  .group-wrap label { font-size: 13px; color: var(--ink-faint); }
+  .group-select {
+    font-family: var(--sans);
+    font-size: 13px;
+    padding: 5px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: white;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .group-select:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* A header breaks the row it lands on, so each group starts its own row. */
+  .group-header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--rule);
+    margin-top: 8px;
+  }
+  .group-header:first-of-type { margin-top: 0; }
+  .group-header .group-name {
+    font-family: var(--serif);
+    font-size: 20px;
+    color: var(--ink);
+  }
+  .group-header .group-count {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -757,7 +818,17 @@
     <div class="search-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
       <input type="text" id="search" placeholder="Search artifacts..." autocomplete="off">
-      <span class="search-count" id="search-count"></span>
+    </div>
+    <div class="browse-bar">
+      <div class="type-chips" id="type-chips"></div>
+      <div class="group-wrap">
+        <label for="group-select">Group by</label>
+        <select class="group-select" id="group-select" onchange="setGroupBy(this.value)">
+          <option value="none">Nothing</option>
+          <option value="ext">File type</option>
+          <option value="date">Date added</option>
+        </select>
+      </div>
     </div>
     <div class="home-actions">
       <button class="home-action-btn" id="import-btn" onclick="document.getElementById('import-input').click()">Import files</button>
@@ -917,6 +988,12 @@
   });
 
   let files = [], filtered = [], activeFile = null;
+  // One dimension drives both controls: the file extension. The chip you click
+  // and the header you read name the same thing.
+  let extFilter = null;              // null = every type
+  let groupBy = 'none';              // 'none' | 'ext' | 'date'
+  let countByExt = new Map();        // extension -> matches within the current search
+  const groupHeaderByKey = new Map();
   let selectMode = false;
   let editMode = false;
   let livePreviewExt = null;
@@ -1105,9 +1182,8 @@
       files.forEach(f => {
         if (f.thumbnail_mtime) thumbnailMtimeByName.set(f.name, f.thumbnail_mtime);
       });
-      filtered = [...files];
+      applyFilters();
       renderGrid();
-      document.getElementById('file-count').textContent = files.length + ' artifact' + (files.length !== 1 ? 's' : '');
     } catch {
       cardCache.clear();
       document.getElementById('grid').innerHTML = '<div class="empty-state"><div class="icon">&#9888;</div><div class="msg">Gallery server is not running</div></div>';
@@ -1201,10 +1277,129 @@
     return el;
   }
 
+  // The only place `filtered` is assigned. Search narrows first, so the chip
+  // counts describe what the current search can actually reach.
+  function applyFilters() {
+    const q = document.getElementById('search').value.trim();
+    const searchMatched = q ? files.filter(f => fuzzyMatch(q, f.name)) : files.slice();
+
+    countByExt = new Map();
+    searchMatched.forEach(f => {
+      const e = getExt(f.name) || '(none)';
+      countByExt.set(e, (countByExt.get(e) || 0) + 1);
+    });
+
+    filtered = extFilter
+      ? searchMatched.filter(f => (getExt(f.name) || '(none)') === extFilter)
+      : searchMatched;
+
+    renderTypeChips(searchMatched.length);
+    renderCounts();
+  }
+
+  function renderCounts() {
+    const n = files.length;
+    const label = n + ' artifact' + (n !== 1 ? 's' : '');
+    document.getElementById('file-count').textContent =
+      filtered.length === n ? label : filtered.length + ' of ' + label;
+  }
+
+  // Chips come from the types actually present, so the row never offers a
+  // filter that matches nothing in the collection.
+  function renderTypeChips(searchTotal) {
+    const present = new Map();
+    files.forEach(f => {
+      const e = getExt(f.name) || '(none)';
+      present.set(e, (present.get(e) || 0) + 1);
+    });
+    const order = [...present.keys()].sort(
+      (a, b) => present.get(b) - present.get(a) || a.localeCompare(b));
+
+    const wrap = document.getElementById('type-chips');
+    wrap.innerHTML = '';
+    wrap.appendChild(makeChip(null, 'All', searchTotal, extFilter === null));
+    order.forEach(e => {
+      const n = countByExt.get(e) || 0;
+      wrap.appendChild(makeChip(e, e === '(none)' ? 'no extension' : '.' + e, n,
+                                extFilter === e));
+    });
+  }
+
+  function chipLabel(ext) {
+    return ext === '(none)' ? 'extension-less' : '.' + ext;
+  }
+
+  function makeChip(ext, label, count, active) {
+    const b = document.createElement('button');
+    b.className = 'type-chip' + (active ? ' active' : '');
+    b.dataset.ext = ext === null ? '' : ext;
+    b.innerHTML = label + '<span class="chip-count">' + count + '</span>';
+    // A zero chip would only ever produce an empty grid. The active one stays
+    // live so it can always be switched off.
+    b.disabled = count === 0 && !active;
+    b.onclick = () => setExtFilter(active ? null : ext);
+    return b;
+  }
+
+  function setExtFilter(ext) {
+    extFilter = ext;
+    applyFilters();
+    renderGrid();
+  }
+
+  function setGroupBy(mode) {
+    groupBy = mode;
+    renderGrid();
+  }
+
+  // ── Grouping ──────────────────────────────────────────────────────
+
+  const DATE_GROUPS = [
+    ['today', 'Today', 1],
+    ['week', 'This week', 7],
+    ['month', 'This month', 30],
+    ['older', 'Older', Infinity],
+  ];
+
+  function groupKeyOf(f) {
+    if (groupBy === 'ext') return getExt(f.name) || '(none)';
+    const days = (Date.now() - f.mtime) / 86400000;
+    return (DATE_GROUPS.find(g => days < g[2]) || DATE_GROUPS[3])[0];
+  }
+
+  function groupLabelOf(key) {
+    if (groupBy === 'ext') return key === '(none)' ? 'No extension' : '.' + key;
+    const hit = DATE_GROUPS.find(g => g[0] === key);
+    return hit ? hit[1] : key;
+  }
+
+  // Date groups read chronologically; type groups lead with the biggest.
+  function sortGroupKeys(keys, sizeOf) {
+    if (groupBy === 'date') {
+      const rank = DATE_GROUPS.map(g => g[0]);
+      return keys.slice().sort((a, b) => rank.indexOf(a) - rank.indexOf(b));
+    }
+    return keys.slice().sort((a, b) => sizeOf(b) - sizeOf(a) || a.localeCompare(b));
+  }
+
+  function groupHeader(key, count, grid) {
+    let el = groupHeaderByKey.get(key);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'group-header';
+      el.dataset.group = key;
+      el.innerHTML = '<span class="group-name"></span><span class="group-count"></span>';
+      groupHeaderByKey.set(key, el);
+    }
+    if (el.parentNode !== grid) grid.appendChild(el);
+    el.querySelector('.group-name').textContent = groupLabelOf(key);
+    el.querySelector('.group-count').textContent =
+      count + ' item' + (count !== 1 ? 's' : '');
+    return el;
+  }
+
   function renderGrid() {
     const grid = document.getElementById('grid');
-    const q = document.getElementById('search').value;
-    document.getElementById('search-count').textContent = q ? filtered.length + ' found' : '';
 
     // Empty-state node lives alongside the cards; never wipe the grid, because
     // detaching/reinserting an <iframe> forces the browser to reload it.
@@ -1213,10 +1408,18 @@
       empty = document.createElement('div');
       empty.id = 'grid-empty';
       empty.className = 'empty-state';
-      empty.innerHTML = '<div class="icon">&#8709;</div><div class="msg">No artifacts match your search</div>';
+      empty.innerHTML = '<div class="icon">&#8709;</div><div class="msg"></div>';
       grid.appendChild(empty);
     }
     empty.style.display = filtered.length === 0 ? '' : 'none';
+    if (filtered.length === 0) {
+      const q = document.getElementById('search').value.trim();
+      empty.querySelector('.msg').textContent =
+        q && extFilter ? 'No ' + chipLabel(extFilter) + ' artifacts match "' + q + '"'
+        : extFilter ? 'No ' + chipLabel(extFilter) + ' artifacts yet'
+        : q ? 'No artifacts match "' + q + '"'
+        : 'No artifacts yet';
+    }
 
     // Ensure every known file has a card, appended once and never moved.
     files.forEach(f => {
@@ -1224,8 +1427,33 @@
       if (el.parentNode !== grid) grid.appendChild(el);
     });
 
-    // Filter + order purely via CSS so no DOM nodes are relocated.
-    const rank = new Map(filtered.map((f, i) => [f.name, i]));
+    // Filter, order and grouping purely via CSS so no DOM nodes are relocated:
+    // moving a card would reload its thumbnail, and its iframe in the no-CDN
+    // fallback. Headers take part in the same `order` sequence.
+    const rank = new Map();
+    const liveGroups = new Set();
+    if (groupBy === 'none') {
+      filtered.forEach((f, i) => rank.set(f.name, i));
+    } else {
+      const members = new Map();
+      filtered.forEach(f => {
+        const k = groupKeyOf(f);
+        if (!members.has(k)) members.set(k, []);
+        members.get(k).push(f);
+      });
+      let seat = 0;
+      for (const k of sortGroupKeys([...members.keys()], k2 => members.get(k2).length)) {
+        const header = groupHeader(k, members.get(k).length, grid);
+        header.style.display = '';
+        header.style.order = seat++;
+        liveGroups.add(k);
+        members.get(k).forEach(f => rank.set(f.name, seat++));
+      }
+    }
+    groupHeaderByKey.forEach((el, k) => {
+      if (!liveGroups.has(k)) el.style.display = 'none';
+    });
+
     cardCache.forEach(({ el }, name) => {
       if (rank.has(name)) {
         el.style.display = '';
@@ -1395,9 +1623,7 @@
   // ── Search ────────────────────────────────────────────────────────
 
   document.getElementById('search').addEventListener('input', e => {
-    const q = e.target.value.trim();
-    if (!q) { filtered = [...files]; }
-    else { filtered = files.filter(f => fuzzyMatch(q, f.name)); }
+    applyFilters();
     renderGrid();
   });
 
@@ -1428,10 +1654,7 @@
         const data = await res.json();
         files = files.filter(f => !data.deleted.includes(f.name));
         data.deleted.forEach(n => thumbnailMtimeByName.delete(n));
-        const q = document.getElementById('search').value.trim();
-        if (!q) filtered = [...files];
-        else filtered = files.filter(f => fuzzyMatch(q, f.name));
-        document.getElementById('file-count').textContent = files.length + ' artifact' + (files.length !== 1 ? 's' : '');
+        applyFilters();
         renderGrid();
       }
     } catch(e) { alert('Delete failed: ' + e.message); }
@@ -1500,9 +1723,7 @@
     document.getElementById('detail-sidebar').classList.remove('visible');
     activeFile = null;
     // Refresh grid in case of changes
-    const q = document.getElementById('search').value.trim();
-    if (!q) filtered = [...files];
-    else filtered = files.filter(f => fuzzyMatch(q, f.name));
+    applyFilters();
     renderGrid();
   }
 
@@ -2076,10 +2297,7 @@
       const entry = { name: fname, mtime: Date.now() };
       if (existing >= 0) files[existing] = entry;
       else files.unshift(entry);
-      document.getElementById('file-count').textContent = files.length + ' artifact' + (files.length !== 1 ? 's' : '');
-      const q = document.getElementById('search').value.trim();
-      if (!q) filtered = [...files];
-      else filtered = files.filter(f => fuzzyMatch(q, f.name));
+      applyFilters();
       if (!document.getElementById('homepage').classList.contains('hidden')) {
         renderGrid();
       }
