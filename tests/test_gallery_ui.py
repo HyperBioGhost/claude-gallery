@@ -875,6 +875,53 @@ def test_preview_hides_the_source_and_centres_the_rendering(gallery, page):
     assert page.locator('#preview-btn').inner_text() == 'Split'
 
 
+def test_preview_reading_width_is_1080px_of_text(gallery, page):
+    """
+    Deliberately wider than a 68-72ch prose measure: on a 1920 desk the
+    narrower column stranded the text in the middle of the screen. Pinned
+    because it is a judgement call, not a derived value, so a later tidy-up
+    must not quietly narrow it.
+
+    Measured on the text, not the box: box-sizing is border-box, so the
+    padding is inside the max-width.
+    """
+    open_md(gallery, page)
+    page.click('#preview-btn')
+    page.wait_for_timeout(200)
+    for w, h in ((1920, 1200), (1512, 982), (1366, 768)):
+        page.set_viewport_size({'width': w, 'height': h})
+        page.wait_for_timeout(200)
+        m = page.evaluate("""() => {
+            const md = document.querySelector('.md-rendered');
+            const cs = getComputedStyle(md);
+            const r = md.getBoundingClientRect();
+            return { text: Math.round(r.width - parseFloat(cs.paddingLeft) * 2),
+                     hscroll: document.documentElement.scrollWidth >
+                              document.documentElement.clientWidth };
+        }""")
+        assert abs(m['text'] - 1080) <= 2, f'{w}x{h}: text {m["text"]}px'
+        assert not m['hscroll'], f'{w}x{h} scrolls sideways'
+
+
+def test_preview_column_shrinks_rather_than_overflowing(gallery, page):
+    """A window narrower than the column fills instead of scrolling."""
+    open_md(gallery, page)
+    page.click('#preview-btn')
+    page.wait_for_timeout(200)
+    page.set_viewport_size({'width': 900, 'height': 800})
+    page.wait_for_timeout(250)
+    m = page.evaluate("""() => {
+        const md = document.querySelector('.md-rendered');
+        const half = md.closest('.split-half');
+        return { box: Math.round(md.getBoundingClientRect().width),
+                 pane: Math.round(half.getBoundingClientRect().width),
+                 hscroll: document.documentElement.scrollWidth >
+                          document.documentElement.clientWidth };
+    }""")
+    assert m['box'] <= m['pane'], m
+    assert not m['hscroll'], m
+
+
 def test_preview_reading_size_meets_the_type_floor(gallery, page):
     """Split is a comparison view; preview is for reading, so it gets 18px."""
     open_md(gallery, page)

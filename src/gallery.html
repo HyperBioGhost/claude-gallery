@@ -691,9 +691,15 @@
   .split-pane.preview-only .split-scroll { background: var(--paper); }
   .split-pane.preview-only .md-rendered {
     font-size: 18px;
-    max-width: 72ch;
+    /* 1080px of text, plus the gutters on top: box-sizing is border-box, so
+       the padding has to be added back or the measure comes out narrower than
+       the number says. Wider than the 68-72ch a prose measure wants -- this is
+       a deliberate call for a 1920-wide desk, where 72ch stranded the text in
+       the middle of the screen. */
+    --reading-gutter: clamp(20px, 4vw, 48px);
+    max-width: calc(1080px + 2 * var(--reading-gutter));
     margin: 0 auto;
-    padding: 64px clamp(20px, 4vw, 48px) 120px;
+    padding: 64px var(--reading-gutter) 120px;
   }
   /* A pretty-printed JSON or a diagram is not prose, so it gets room instead
      of a reading measure. */
