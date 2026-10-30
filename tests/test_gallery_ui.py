@@ -95,6 +95,123 @@ def test_dev_build_shows_no_update_pill(page):
     assert page.locator('#update-pill').is_hidden()
 
 
+def test_picker_mime_is_bare_for_every_type_the_server_serves(gallery, page):
+    """
+    The guard for the "Invalid type" failure, driven by the server's own MIME
+    map so a charset added to another type is covered without editing a list.
+
+    Deliberately not routed through blob.type: Playwright's Chromium strips
+    parameters from a fetched blob's type while Firefox and real Chrome keep
+    them, so a test that reads blob.type passes in the one engine where the
+    bug does not reproduce. That is why the original Save As test missed this.
+    """
+    exts = ['html', 'htm', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'json',
+            'js', 'css', 'md', 'txt', 'csv', 'ts', 'py', 'xml', 'yaml', 'yml',
+            'mermaid', 'mmd', 'unknownext']
+    served = {e: gallery.mod.guess_mime('x.' + e) for e in exts}
+    # The input has to contain the failure, or the check proves nothing.
+    assert any(';' in m for m in served.values()), served
+
+    got = page.evaluate("""(served) => Object.fromEntries(
+        Object.entries(served).map(([e, m]) => [e, pickerMime(m)]))""", served)
+    for e, mime in got.items():
+        assert ';' not in mime, f'.{e}: {mime!r} still carries parameters'
+        assert mime == mime.strip() and '/' in mime, f'.{e}: {mime!r} not a bare MIME'
+        assert mime == served[e].split(';')[0].strip(), f'.{e}: {mime!r} vs {served[e]!r}'
+
+    # An absent or empty header still has to yield something the picker takes.
+    assert page.evaluate("() => pickerMime('')") == 'application/octet-stream'
+    assert page.evaluate("() => pickerMime(null)") == 'application/octet-stream'
+
+
+@pytest.mark.parametrize('name', ['doc.md', 'table.csv', 'page.html', 'data.json'])
+def test_save_as_offers_a_mime_the_picker_accepts(gallery, page, name):
+    gallery.write(name, 'content')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+
+    # Stand in for the picker: capture what it was handed, and succeed.
+    page.evaluate("""() => {
+        window.__pickerOpts = null;
+        window.__written = false;
+        window.showSaveFilePicker = async (opts) => {
+            window.__pickerOpts = JSON.parse(JSON.stringify(opts));
+            // Enforce what the real API enforces.
+            for (const t of (opts.types || [])) {
+                for (const mime of Object.keys(t.accept || {})) {
+                    if (mime.includes(';')) {
+                        throw new TypeError("Failed to execute 'showSaveFilePicker' on " +
+                                            "'Window': Invalid type: " + mime);
+                    }
+                }
+            }
+            return { createWritable: async () => ({
+                write: async () => { window.__written = true; },
+                close: async () => {},
+            }) };
+        };
+    }""")
+    alerts = []
+    page.on('dialog', lambda d: (alerts.append(d.message), d.dismiss()))
+
+    page.click(f'.card:has-text("{name}")')
+    page.wait_for_selector('#saveas-btn')
+    page.click('#saveas-btn')
+    page.wait_for_function("() => window.__pickerOpts !== null", timeout=5000)
+
+    opts = page.evaluate('window.__pickerOpts')
+    assert alerts == [], alerts
+    assert page.evaluate('window.__written') is True, 'never wrote the file'
+    assert opts['suggestedName'] == name, opts
+
+    mimes = list(opts['types'][0]['accept'].keys())
+    assert len(mimes) == 1, mimes
+    mime = mimes[0]
+    assert ';' not in mime, f'picker rejects parameters: {mime!r}'
+    assert mime.strip() == mime and '/' in mime, f'not a bare MIME: {mime!r}'
+    assert opts['types'][0]['accept'][mime] == ['.' + name.split('.')[-1]], opts
+
+    page.wait_for_function(
+        "() => document.getElementById('save-status').textContent.includes('Saved to disk')",
+        timeout=5000)
+
+
+def test_save_as_surfaces_a_real_failure(gallery, page):
+    """The error path must still report, or a failed save looks like success."""
+    gallery.write('doc.md', '# x\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.evaluate("""() => {
+        window.showSaveFilePicker = async () => { throw new DOMException('boom', 'NotAllowedError'); };
+    }""")
+    alerts = []
+    page.on('dialog', lambda d: (alerts.append(d.message), d.dismiss()))
+    page.click('.card:has-text("doc.md")')
+    page.wait_for_selector('#saveas-btn')
+    page.click('#saveas-btn')
+    page.wait_for_timeout(600)
+    assert any('boom' in a for a in alerts), alerts
+    assert 'Saved to disk' not in page.locator('#save-status').inner_text()
+
+
+def test_save_as_stays_quiet_when_the_user_cancels(gallery, page):
+    """Dismissing the picker is not an error."""
+    gallery.write('doc.md', '# x\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.evaluate("""() => {
+        window.showSaveFilePicker = async () => { throw new DOMException('cancelled', 'AbortError'); };
+    }""")
+    alerts = []
+    page.on('dialog', lambda d: (alerts.append(d.message), d.dismiss()))
+    page.click('.card:has-text("doc.md")')
+    page.wait_for_selector('#saveas-btn')
+    page.click('#saveas-btn')
+    page.wait_for_timeout(600)
+    assert alerts == [], alerts
+    assert 'Saved to disk' not in page.locator('#save-status').inner_text()
+
+
 def test_save_as_works_without_the_file_system_access_api(page):
     """
     showSaveFilePicker is Chrome-only. Firefox and Safari must still be able to

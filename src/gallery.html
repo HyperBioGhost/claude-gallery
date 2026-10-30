@@ -2199,6 +2199,15 @@
 
   // ── Save As ───────────────────────────────────────────────────────
 
+  // The picker rejects a MIME type that carries parameters, and blob.type is
+  // the raw Content-Type header -- the server sends "text/plain; charset=utf-8"
+  // for md, txt, csv, ts, py, xml, yaml and mermaid, so Save As threw
+  // "Invalid type" on all of them. Keep the type, drop the parameters.
+  function pickerMime(contentType) {
+    const bare = (contentType || '').split(';')[0].trim();
+    return bare || 'application/octet-stream';
+  }
+
   async function saveAs() {
     if (!activeFile) return;
     const url = '/files/' + encodeURIComponent(activeFile.name);
@@ -2210,7 +2219,8 @@
       try {
         const handle = await window.showSaveFilePicker({
           suggestedName: activeFile.name,
-          types: ext ? [{ description: ext.toUpperCase() + ' file', accept: { [blob.type || 'application/octet-stream']: ['.' + ext] } }] : []
+          types: ext ? [{ description: ext.toUpperCase() + ' file',
+                          accept: { [pickerMime(blob.type)]: ['.' + ext] } }] : []
         });
         const writable = await handle.createWritable();
         await writable.write(blob);
