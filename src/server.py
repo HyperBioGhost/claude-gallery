@@ -252,7 +252,15 @@ def read_link(pointer: Path) -> dict:
     if not body:
         info['error'] = 'the link file is empty'
         return info
-    target = Path(os.path.expandvars(body[0])).expanduser()
+    raw_target = os.path.expandvars(body[0])
+    # Checked on the text, before Path semantics differ by platform: a
+    # backslash is not a separator on POSIX, so a UNC string is not "absolute"
+    # there and would otherwise be reported as a malformed path instead of as
+    # the off-machine location it is.
+    if raw_target.startswith('\\\\') or raw_target.startswith('//'):
+        info['error'] = f'refused, network path: {raw_target}'
+        return info
+    target = Path(raw_target).expanduser()
     if not target.is_absolute():
         info['error'] = f'not an absolute path: {body[0]}'
         return info
@@ -732,7 +740,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if ext not in PASTE_LINK_EXT:
                         self.send_error(403, f'.{ext} cannot be linked by pasting a path')
                         return
-                    target = Path(os.path.expandvars(body['path'])).expanduser()
+                    raw_path = os.path.expandvars(body['path'])
+                    if raw_path.startswith('\\\\') or raw_path.startswith('//'):
+                        self.send_error(403, 'refused, network path'); return
+                    target = Path(raw_path).expanduser()
                     if not target.is_absolute():
                         self.send_error(400, 'not an absolute path'); return
                     ok, why = is_local_fixed_path(target)
