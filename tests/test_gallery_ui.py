@@ -955,10 +955,17 @@ def _wav_bytes(seconds=1, rate=8000):
 
 
 def _mp4_path():
-    """A real encoded MP4 is needed for a frame grab; use the project's own."""
-    candidates = sorted(
-        pathlib.Path(r'C:\Users\enzoluo\Documents\Amazon\AI_Shit').rglob('*.mp4'))
-    return candidates[0] if candidates else None
+    """
+    A real encoded MP4, committed with the tests.
+
+    This used to search a folder on one machine, so CI skipped every video
+    test -- 3 silent skips that read as a pass while nothing about video was
+    ever exercised there. The fixture is 6 KB of testsrc: a moving pattern, so
+    a grabbed frame cannot be a flat colour that any bug would also produce.
+    """
+    fixture = pathlib.Path(__file__).parent / 'fixtures' / 'tiny.mp4'
+    assert fixture.is_file(), f'missing video fixture: {fixture}'
+    return fixture
 
 
 def link_to(gallery, display, target, note='placed by the project'):
@@ -1070,8 +1077,6 @@ def test_removing_a_linked_artifact_says_the_asset_stays(gallery, page):
 
 def test_video_card_picture_comes_from_a_real_frame(gallery, page):
     src = _mp4_path()
-    if src is None:
-        pytest.skip('no mp4 available to grab a frame from')
     link_to(gallery, 'render.mp4', src)
     page.reload(wait_until='networkidle')
     wait_for_app(page)
@@ -1083,15 +1088,13 @@ def test_video_card_picture_comes_from_a_real_frame(gallery, page):
     assert png.is_file()
     import struct
     w, h = struct.unpack('>II', png.read_bytes()[16:24])
-    # The real frame size, not the 720x400 document-raster viewport.
-    assert w > 100 and h > 100, (w, h)
-    assert (w, h) != (720, 400), 'captured the raster viewport, not a frame'
+    # The fixture's own frame size, which is also proof the frame came from
+    # the video rather than from the document-raster path.
+    assert (w, h) == (320, 180), (w, h)
 
 
 def test_video_plays_and_seeks(gallery, page):
     src = _mp4_path()
-    if src is None:
-        pytest.skip('no mp4 available')
     link_to(gallery, 'render.mp4', src)
     page.reload(wait_until='networkidle')
     wait_for_app(page)
@@ -1223,8 +1226,6 @@ def test_saving_from_the_guard_keeps_it(gallery, page):
 
 def test_a_pasted_media_path_plays_without_being_copied(gallery, page):
     src = _mp4_path()
-    if src is None:
-        pytest.skip('no mp4 available')
     paste_text(page, str(src))
     page.wait_for_selector('#detail-preview > video', timeout=25000)
     m = page.evaluate("""async () => {
