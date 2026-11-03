@@ -90,6 +90,7 @@ def gallery(tmp_path, monkeypatch):
     mod.ROOT = root
     mod.THUMBNAIL_DIR = root / '.card-thumbnails'
     mod.HISTORY_DIR = root / '.history'
+    mod.UNSAVED_DIR = root / '.unsaved'
     mod.INDEX_FILE = root / 'artifacts.json'
     mod.LOG_FILE = root / 'gallery.log'
     mod.GALLERY_HTML = SRC / 'gallery.html'

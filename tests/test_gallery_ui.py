@@ -10,6 +10,7 @@ Skipped (not failed) when Playwright is unavailable, so the suite still runs on
 a machine without a browser. CI installs chromium, so these do run there.
 """
 import os
+import pathlib
 
 import pytest
 
@@ -35,14 +36,27 @@ SVG_FIXTURE = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
                '<text id="label" x="10" y="50">ORIGINAL</text></svg>')
 
 
+# Reading and writing the clipboard is permissioned differently per engine,
+# and both have to be arranged for a paste test to drive the real thing.
+FIREFOX_CLIPBOARD_PREFS = {
+    'dom.events.asyncClipboard.clipboardItem': True,
+    'dom.events.asyncClipboard.readText': True,
+    'dom.events.testing.asyncClipboard': True,
+}
+
+
 @pytest.fixture
 def page(gallery):
     with sync_playwright() as pw:
+        launch = {'firefox_user_prefs': FIREFOX_CLIPBOARD_PREFS} if ENGINE == 'firefox' else {}
         try:
-            browser = getattr(pw, ENGINE).launch()
+            browser = getattr(pw, ENGINE).launch(**launch)
         except Exception as e:                       # no browser binary present
             pytest.skip(f'{ENGINE} unavailable: {e}')
-        pg = browser.new_page(viewport={'width': 1280, 'height': 800})
+        context = browser.new_context(viewport={'width': 1280, 'height': 800})
+        if ENGINE == 'chromium':
+            context.grant_permissions(['clipboard-read', 'clipboard-write'])
+        pg = context.new_page()
         errors = []
         pg.on('pageerror', lambda e: errors.append(str(e)))
         pg.goto(gallery.base, wait_until='networkidle')
@@ -571,7 +585,10 @@ def seed_mixed(gallery, page):
     gallery.write('data.csv', 'a,b\n1,2\n')
     page.reload(wait_until='networkidle')
     wait_for_app(page)
-    page.wait_for_function("() => document.querySelectorAll('.type-chip').length > 1")
+    # Wait for the finished row, not merely "more than one chip": the loose
+    # condition let a snapshot read a row that was still being built, which
+    # failed about once per full suite run.
+    expect(page.locator('.type-chip')).to_have_count(4)
 
 
 def chips(page):
@@ -922,6 +939,430 @@ def test_every_group_can_be_folded_at_once(gallery, page):
                    .filter(h => h.offsetParent !== null).length,
         empty: document.getElementById('grid-empty').offsetParent !== null })""")
     assert shown == {'cards': 0, 'headers': 3, 'empty': False}, shown
+
+
+# ── media assets and virtual links ────────────────────────────────────
+# A tiny real MP4 and WAV, built here so the suite needs no fixture binaries.
+
+def _wav_bytes(seconds=1, rate=8000):
+    import math, struct
+    frames = b''.join(
+        struct.pack('<h', int(12000 * math.sin(2 * math.pi * 440 * i / rate)))
+        for i in range(rate * seconds))
+    return (b'RIFF' + struct.pack('<I', 36 + len(frames)) + b'WAVEfmt '
+            + struct.pack('<IHHIIHH', 16, 1, 1, rate, rate * 2, 2, 16)
+            + b'data' + struct.pack('<I', len(frames)) + frames)
+
+
+def _mp4_path():
+    """A real encoded MP4 is needed for a frame grab; use the project's own."""
+    candidates = sorted(
+        pathlib.Path(r'C:\Users\enzoluo\Documents\Amazon\AI_Shit').rglob('*.mp4'))
+    return candidates[0] if candidates else None
+
+
+def link_to(gallery, display, target, note='placed by the project'):
+    (gallery.root / (display + '.link')).write_text(
+        '# ' + note + '\n' + str(target) + '\n', encoding='utf-8')
+
+
+def test_audio_gets_a_player_and_a_name(gallery, page):
+    (gallery.root / 'tone.wav').write_bytes(_wav_bytes())
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("tone.wav")')
+    page.wait_for_selector('.audio-stage audio')
+    m = page.evaluate("""async () => {
+        const a = document.querySelector('.audio-stage audio');
+        await new Promise(r => { if (a.readyState >= 1) r(); else a.onloadedmetadata = r; });
+        return { controls: a.controls, duration: Math.round(a.duration),
+                 name: document.querySelector('.audio-name').textContent };
+    }""")
+    assert m['controls'] is True
+    assert m['duration'] == 1, m
+    assert m['name'] == 'tone.wav'
+
+
+def test_audio_card_shows_its_type_rather_than_a_blank_picture(gallery, page):
+    (gallery.root / 'tone.wav').write_bytes(_wav_bytes())
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    badge = page.locator('.card:has-text("tone.wav") .card-preview .type-badge')
+    expect(badge).to_be_visible()
+    assert badge.inner_text() == '.wav'
+    # CSS uppercases the badge, so compare case-insensitively.
+    assert page.locator('.card:has-text("tone.wav") .badge').inner_text().lower() == 'audio'
+
+
+def test_a_linked_asset_is_marked_and_plays(gallery, page):
+    """The asset stays where its project keeps it; the gallery still serves it."""
+    outside = gallery.root.parent / 'project'
+    outside.mkdir(exist_ok=True)
+    asset = outside / 'bed.wav'
+    asset.write_bytes(_wav_bytes(2))
+    link_to(gallery, 'music.wav', asset)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+
+    assert page.locator('.card:has-text("music.wav") .link-mark').inner_text() == 'link'
+    page.click('.card:has-text("music.wav")')
+    page.wait_for_selector('.audio-stage audio')
+    assert page.locator('#link-badge').inner_text() == 'linked'
+    assert page.evaluate("""async () => {
+        const a = document.querySelector('.audio-stage audio');
+        await new Promise(r => { if (a.readyState >= 1) r(); else a.onloadedmetadata = r; });
+        return Math.round(a.duration);
+    }""") == 2
+    # Nothing was copied in: only the pointer lives in the artifacts folder.
+    assert not (gallery.root / 'music.wav').exists()
+    assert (gallery.root / 'music.wav.link').is_file()
+
+
+def test_a_broken_link_states_the_reason_and_the_file_to_edit(gallery, page):
+    link_to(gallery, 'gone.mp4', gallery.root.parent / 'nowhere' / 'missing.mp4')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    assert page.locator('.card:has-text("gone.mp4") .link-mark').inner_text() == 'link broken'
+    page.click('.card:has-text("gone.mp4")')
+    page.wait_for_selector('.link-broken')
+    text = page.locator('.link-broken').inner_text()
+    assert 'missing.mp4' in text, text
+    assert 'gone.mp4.link' in text, text          # names the file to fix
+    assert page.locator('#detail-preview > video').count() == 0
+    assert page.locator('#link-badge').inner_text() == 'link broken'
+
+
+def test_a_broken_link_is_not_asked_for_over_http(gallery, page):
+    """Capturing a frame from an unreachable target can only 409."""
+    link_to(gallery, 'gone.mp4', gallery.root.parent / 'nowhere' / 'missing.mp4')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    bad = []
+    page.on('response', lambda r: bad.append((r.status, r.url)) if r.status >= 400 else None)
+    page.click('.card:has-text("gone.mp4")')
+    page.wait_for_selector('.link-broken')
+    page.wait_for_timeout(1500)
+    assert bad == [], bad
+
+
+def test_removing_a_linked_artifact_says_the_asset_stays(gallery, page):
+    outside = gallery.root.parent / 'project'
+    outside.mkdir(exist_ok=True)
+    asset = outside / 'bed.wav'
+    asset.write_bytes(_wav_bytes())
+    link_to(gallery, 'music.wav', asset)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+
+    prompts = []
+    page.on('dialog', lambda d: (prompts.append(d.message), d.accept()))
+    page.click('#select-mode-btn')
+    page.check('.card:has-text("music.wav") .select-check')
+    page.click('#delete-selected-btn')
+    page.wait_for_function(
+        "() => !document.body.innerText.includes('music.wav')", timeout=5000)
+
+    assert prompts and 'only the link is removed' in prompts[0], prompts
+    assert 'PERMANENTLY DELETE' not in prompts[0], prompts[0]
+    assert asset.is_file(), 'the asset must survive'
+    assert not (gallery.root / 'music.wav.link').exists()
+
+
+def test_video_card_picture_comes_from_a_real_frame(gallery, page):
+    src = _mp4_path()
+    if src is None:
+        pytest.skip('no mp4 available to grab a frame from')
+    link_to(gallery, 'render.mp4', src)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.wait_for_function(
+        """() => { const c = [...document.querySelectorAll('.card')]
+             .find(x => x.querySelector('.card-name').textContent === 'render.mp4');
+           return c && c.querySelector('img.card-thumbnail'); }""", timeout=60000)
+    png = gallery.root / '.card-thumbnails' / 'render.mp4.png'
+    assert png.is_file()
+    import struct
+    w, h = struct.unpack('>II', png.read_bytes()[16:24])
+    # The real frame size, not the 720x400 document-raster viewport.
+    assert w > 100 and h > 100, (w, h)
+    assert (w, h) != (720, 400), 'captured the raster viewport, not a frame'
+
+
+def test_video_plays_and_seeks(gallery, page):
+    src = _mp4_path()
+    if src is None:
+        pytest.skip('no mp4 available')
+    link_to(gallery, 'render.mp4', src)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("render.mp4")')
+    page.wait_for_selector('#detail-preview > video')
+    m = page.evaluate("""async () => {
+        const v = document.querySelector('#detail-preview > video');
+        await new Promise(r => { if (v.readyState >= 1) r(); else v.onloadedmetadata = r; });
+        const target = Math.min(2, v.duration / 2);
+        v.currentTime = target;
+        await new Promise(r => v.addEventListener('seeked', r, { once: true }));
+        return { controls: v.controls, w: v.videoWidth,
+                 landed: Math.abs(v.currentTime - target) < 0.5 };
+    }""")
+    assert m['controls'] is True
+    assert m['w'] > 0, m
+    # Seeking only works because the server answers Range with 206.
+    assert m['landed'] is True, m
+
+
+# ── paste anywhere ────────────────────────────────────────────────────
+
+def paste_text(page, payload):
+    """
+    Put the text on the real clipboard and press Ctrl+V.
+
+    A synthetic ClipboardEvent is not usable here: Firefox hands the listener a
+    clipboardData object whose getData returns an empty string, so every paste
+    test passed on Chromium and silently did nothing on Firefox. Driving the
+    actual clipboard exercises the same path a person does, in both engines.
+    """
+    page.evaluate("(text) => navigator.clipboard.writeText(text)", payload)
+    page.wait_for_timeout(150)
+    page.keyboard.press('Control+V')
+
+
+def test_pasting_text_opens_it_at_once_as_unsaved(gallery, page):
+    paste_text(page, '# Release notes\n\nsome pasted prose')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    # Named from the heading rather than a timestamp.
+    assert page.locator('#detail-filename').inner_text() == 'release-notes.md'
+    assert page.locator('#keep-btn').is_visible()
+    assert 'Release notes' in page.locator('#detail-preview').inner_text()
+    # Not registered: nothing in the artifacts folder, nothing in the index.
+    assert not (gallery.root / 'release-notes.md').exists()
+    assert (gallery.root / '.unsaved' / 'release-notes.md').is_file()
+
+
+def test_an_unsaved_card_is_marked_on_the_grid(gallery, page):
+    """
+    The card carries its own marker, so a paste is never mistaken for a
+    registered artifact. Read from the grid DOM rather than by navigating:
+    leaving the detail view always asks about the paste first, so the
+    homepage is not reachable with one still pending.
+    """
+    paste_text(page, '# marked please\n')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    card = page.locator('.card.unsaved')
+    expect(card).to_have_count(1)
+    assert card.locator('.card-name').inner_text() == 'marked-please.md'
+    assert card.locator('.unsaved-mark').inner_text() == 'UNSAVED'
+    # Registered artifacts carry no marker.
+    assert page.locator('.card:not(.unsaved) .unsaved-mark').count() == 0
+
+
+def test_a_reload_clears_an_unsaved_paste(gallery, page):
+    """Closing or reloading the gallery is a leaving moment: nothing kept."""
+    paste_text(page, '# throwaway\n')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    assert (gallery.root / '.unsaved' / 'throwaway.md').is_file()
+    page.reload(wait_until='domcontentloaded')
+    wait_for_app(page)
+    page.wait_for_timeout(600)
+    assert not (gallery.root / '.unsaved' / 'throwaway.md').exists()
+    assert page.locator('.card.unsaved').count() == 0
+
+
+def test_leaving_an_unsaved_paste_asks_first(gallery, page):
+    paste_text(page, '# keep me\n')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    page.click('.back-btn')
+    page.wait_for_selector('#leave-guard.visible')
+    why = page.locator('#guard-why').inner_text()
+    assert 'not a registered artifact' in why, why
+    assert 'lost if you leave' in why, why
+    assert 'keep-me.md' in page.locator('#guard-list').inner_text()
+
+    page.click('#guard-stay')
+    page.wait_for_timeout(300)
+    assert page.locator('#unsaved-badge').is_visible(), 'Stay should keep it open'
+    assert (gallery.root / '.unsaved' / 'keep-me.md').is_file()
+
+
+def test_save_to_gallery_registers_the_paste(gallery, page):
+    paste_text(page, '# keep me\n')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    page.click('#keep-btn')
+    page.wait_for_function(
+        "() => document.getElementById('unsaved-badge').offsetParent === null",
+        timeout=10000)
+    assert (gallery.root / 'keep-me.md').is_file()
+    assert not (gallery.root / '.unsaved' / 'keep-me.md').exists()
+    import json
+    assert json.loads((gallery.root / 'artifacts.json').read_text(encoding='utf-8')) == ['keep-me.md']
+
+
+def test_discarding_from_the_guard_throws_the_paste_away(gallery, page):
+    paste_text(page, '# throwaway\n')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    page.click('.back-btn')
+    page.wait_for_selector('#leave-guard.visible')
+    page.click('#guard-discard')
+    page.wait_for_function("() => !document.getElementById('leave-guard').classList.contains('visible')")
+    page.wait_for_timeout(500)
+    assert not (gallery.root / 'throwaway.md').exists()
+    assert not (gallery.root / '.unsaved' / 'throwaway.md').exists()
+
+
+def test_saving_from_the_guard_keeps_it(gallery, page):
+    paste_text(page, '# from the guard\n')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    page.click('.back-btn')
+    page.wait_for_selector('#leave-guard.visible')
+    page.click('#guard-save')
+    page.wait_for_function("() => !document.getElementById('leave-guard').classList.contains('visible')")
+    page.wait_for_timeout(600)
+    assert (gallery.root / 'from-the-guard.md').is_file()
+
+
+def test_a_pasted_media_path_plays_without_being_copied(gallery, page):
+    src = _mp4_path()
+    if src is None:
+        pytest.skip('no mp4 available')
+    paste_text(page, str(src))
+    page.wait_for_selector('#detail-preview > video', timeout=25000)
+    m = page.evaluate("""async () => {
+        const v = document.querySelector('#detail-preview > video');
+        await new Promise(r => { if (v.readyState >= 1) r(); else v.onloadedmetadata = r; });
+        return { w: v.videoWidth,
+                 unsaved: document.getElementById('unsaved-badge').offsetParent !== null,
+                 linked: document.getElementById('link-badge').textContent };
+    }""")
+    assert m['w'] > 0 and m['unsaved'] is True and m['linked'] == 'linked', m
+    assert (gallery.root / '.unsaved' / (src.name + '.link')).is_file()
+    assert not (gallery.root / '.unsaved' / src.name).exists(), 'must not copy the asset'
+
+
+def test_pasting_a_non_media_path_explains_instead_of_making_a_note(gallery, page):
+    paste_text(page, r'C:\Windows\win.ini')
+    page.wait_for_function(
+        "() => document.getElementById('import-status').textContent.includes('cannot')",
+        timeout=10000)
+    msg = page.locator('#import-status').inner_text()
+    assert '.ini' in msg, msg
+    # No junk artifact named after the path.
+    assert not (gallery.root / '.unsaved').exists() or \
+           not list((gallery.root / '.unsaved').iterdir())
+
+
+def test_a_paste_into_the_search_box_is_left_alone(gallery, page):
+    """Typing or pasting into a field must not create an artifact."""
+    gallery.write('alpha.md', '# a\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.evaluate("() => navigator.clipboard.writeText('alpha')")
+    page.wait_for_timeout(150)
+    page.click('#search')
+    page.keyboard.press('Control+V')
+    page.wait_for_timeout(900)
+    assert page.locator('#unsaved-badge').is_hidden()
+    assert not (gallery.root / '.unsaved').exists() or \
+           not list((gallery.root / '.unsaved').iterdir())
+
+
+# ── pasting over something already in the gallery ─────────────────────
+# A text paste is named from its first heading, so the artifact already in the
+# gallery has to carry that same name for the collision to happen at all.
+
+def seed_collision(gallery, page, registered_body, pasted_body):
+    (gallery.root / 'release-notes.md').write_bytes(registered_body.encode())
+    gallery.get('/notify?file=release-notes.md')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    paste_text(page, pasted_body)
+    page.wait_for_selector('#leave-guard.visible', timeout=15000)
+
+
+def test_a_colliding_paste_asks_what_to_do(gallery, page):
+    seed_collision(gallery, page,
+                   '# Release notes\n\nthe registered body\n',
+                   '# Release notes\n\na newer body\n')
+    assert page.locator('#guard-title').inner_text() == 'Already in the gallery'
+    why = page.locator('#guard-why').inner_text()
+    assert 'release-notes.md' in why and 'already registered' in why, why
+    labels = page.evaluate(
+        "() => [...document.querySelectorAll('#guard-actions button')].map(b => b.textContent)")
+    assert labels == ['Discard', 'Keep as unsaved', 'Replace it'], labels
+    # The paste is already open behind the dialog, so it can be looked at.
+    assert page.locator('#detail-filename').inner_text() == 'release-notes-1.md'
+
+
+def test_identical_content_does_not_offer_a_pointless_replace(gallery, page):
+    """
+    Paste, save, then paste the same thing again -- which is how a real
+    duplicate arises. Seeding a file by hand cannot produce one: the Windows
+    clipboard turns a newline into CRLF, so pasted text never matches a file
+    written with bare newlines.
+    """
+    body = '# Release notes\n\nsame bytes\n'
+    paste_text(page, body)
+    page.wait_for_selector('#keep-btn:visible', timeout=15000)
+    page.click('#keep-btn')
+    page.wait_for_function(
+        "() => document.getElementById('unsaved-badge').offsetParent === null",
+        timeout=10000)
+    page.click('.back-btn')
+    page.wait_for_timeout(400)
+
+    paste_text(page, body)
+    page.wait_for_selector('#leave-guard.visible', timeout=15000)
+    why = page.locator('#guard-why').inner_text()
+    assert 'identical' in why, why
+    labels = page.evaluate(
+        "() => [...document.querySelectorAll('#guard-actions button')].map(b => b.textContent)")
+    assert 'Replace it' not in labels, labels
+    assert labels == ['Discard', 'Look at it anyway'], labels
+
+
+def test_replace_puts_the_paste_in_the_artifacts_place(gallery, page):
+    seed_collision(gallery, page,
+                   '# Release notes\n\nthe registered body\n',
+                   '# Release notes\n\na newer body\n')
+    page.click('#guard-replace')
+    page.wait_for_function(
+        "() => document.getElementById('detail-filename').textContent === 'release-notes.md'",
+        timeout=10000)
+    page.wait_for_timeout(400)
+    saved = (gallery.root / 'release-notes.md').read_bytes().replace(b'\r\n', b'\n')
+    assert saved == b'# Release notes\n\na newer body\n', saved
+    assert not (gallery.root / '.unsaved' / 'release-notes-1.md').exists()
+    assert page.locator('#unsaved-badge').is_hidden()
+
+
+def test_keep_as_unsaved_leaves_the_registered_one_alone(gallery, page):
+    seed_collision(gallery, page,
+                   '# Release notes\n\nthe registered body\n',
+                   '# Release notes\n\na newer body\n')
+    page.click('#guard-unsaved')
+    page.wait_for_function(
+        "() => !document.getElementById('leave-guard').classList.contains('visible')")
+    page.wait_for_timeout(400)
+    assert (gallery.root / 'release-notes.md').read_bytes() == \
+        b'# Release notes\n\nthe registered body\n'
+    assert (gallery.root / '.unsaved' / 'release-notes-1.md').is_file()
+    assert page.locator('#unsaved-badge').is_visible()
+
+
+def test_discard_from_the_collision_dialog_drops_the_paste(gallery, page):
+    seed_collision(gallery, page,
+                   '# Release notes\n\nthe registered body\n',
+                   '# Release notes\n\na newer body\n')
+    page.click('#guard-discard')
+    page.wait_for_function(
+        "() => !document.getElementById('leave-guard').classList.contains('visible')")
+    page.wait_for_timeout(600)
+    assert (gallery.root / 'release-notes.md').read_bytes() == \
+        b'# Release notes\n\nthe registered body\n'
+    assert not (gallery.root / '.unsaved').exists() or \
+           not list((gallery.root / '.unsaved').iterdir())
+    # Back on the grid, without a second question about leaving.
+    assert page.locator('#homepage').evaluate("el => !el.classList.contains('hidden')")
 
 
 # ── preview toggle ────────────────────────────────────────────────────

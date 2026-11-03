@@ -90,9 +90,15 @@ else:
 # (.thumbnails/ was an earlier html2canvas cache and is no longer read.)
 THUMBNAIL_DIR = ROOT / '.card-thumbnails'
 HISTORY_DIR = ROOT / '.history'
+# Pasted-in artifacts that have not been saved to the gallery. They live in
+# their own folder, so "not a registered artifact" is literally true: nothing
+# here is in artifacts.json, and leaving the gallery clears the folder.
+# Named for the Save button rather than "temp", so the state and the action
+# that resolves it share one word.
+UNSAVED_DIR = ROOT / '.unsaved'
 LOG_FILE = ROOT.parent / 'gallery.log' if getattr(sys, 'frozen', False) else ROOT / 'gallery.log'
 SKIP = {'gallery.html', 'server.py', 'artifacts.json', '.thumbnails', '.card-thumbnails', '.history',
-        'gallery.log', 'gallery.log.1'}
+        '.unsaved', 'gallery.log', 'gallery.log.1'}
 INDEX_FILE = ROOT / 'artifacts.json'
 HISTORY_KEEP = 10            # snapshots retained per file
 UPDATE_CACHE_TTL = 6 * 3600  # don't re-ask GitHub more often than this
@@ -190,6 +196,117 @@ def thumbnail_mtime(fname: str):
     return int(p.stat().st_mtime * 1000) if p.is_file() else None
 
 
+# ── Virtual links ──────────────────────────────────────────────────────
+# A `<display-name>.link` file holds the absolute path of an asset that lives
+# wherever its project keeps it. The gallery presents the asset without a copy
+# landing in the artifacts folder.
+#
+# Scope is the machine, not a folder: any local fixed volume is allowed, and
+# anything off this machine is refused. A pointer can only be created by
+# writing to disk -- /save and /import refuse the name -- because artifacts
+# run same-origin and could otherwise mint a pointer at any file and read it.
+
+LINK_SUFFIX = '.link'
+
+
+def is_local_fixed_path(target: Path) -> tuple[bool, str]:
+    """Is this path on a local fixed volume? Returns (ok, reason-if-not)."""
+    raw = str(target)
+    if raw.startswith('\\\\') or raw.startswith('//'):
+        return False, 'network path'
+    if sys.platform == 'win32':
+        drive = os.path.splitdrive(str(target.resolve()))[0]
+        if not drive:
+            return False, 'no drive letter'
+        try:
+            import ctypes
+            # 0 unknown, 1 no root, 2 removable, 3 fixed, 4 remote, 5 cdrom, 6 ramdisk
+            kind = ctypes.windll.kernel32.GetDriveTypeW(drive + '\\')
+        except Exception as e:
+            return False, f'could not identify the drive ({e})'
+        names = {0: 'unknown', 1: 'missing', 2: 'removable',
+                 3: 'fixed', 4: 'network', 5: 'optical', 6: 'ram disk'}
+        if kind != 3:
+            return False, f'{names.get(kind, kind)} drive'
+        return True, ''
+    # macOS and Linux: external media mounts under /Volumes or /media.
+    parts = target.resolve().parts
+    if len(parts) > 1 and parts[1] in ('Volumes', 'media', 'mnt', 'net'):
+        return False, f'mounted volume (/{parts[1]})'
+    return True, ''
+
+
+def read_link(pointer: Path) -> dict:
+    """
+    Resolve a pointer file. Always returns a dict; `error` is set when the
+    asset cannot be served, so the gallery can say why instead of 404ing.
+    """
+    info = {'pointer': pointer.name, 'name': pointer.name[:-len(LINK_SUFFIX)],
+            'target': None, 'error': None}
+    try:
+        lines = [l.strip() for l in pointer.read_text(encoding='utf-8').splitlines()]
+    except Exception as e:
+        info['error'] = f'cannot read the link file: {e}'
+        return info
+    body = [l for l in lines if l and not l.startswith('#')]
+    if not body:
+        info['error'] = 'the link file is empty'
+        return info
+    target = Path(os.path.expandvars(body[0])).expanduser()
+    if not target.is_absolute():
+        info['error'] = f'not an absolute path: {body[0]}'
+        return info
+    ok, why = is_local_fixed_path(target)
+    if not ok:
+        info['error'] = f'refused, {why}: {target}'
+        return info
+    info['target'] = target
+    if not target.exists():
+        info['error'] = f'target is missing: {target}'
+    elif not target.is_file():
+        info['error'] = f'target is not a file: {target}'
+    return info
+
+
+def link_pointers() -> dict:
+    """display name -> resolved link info, for every pointer in ROOT."""
+    out = {}
+    for f in ROOT.iterdir():
+        if f.is_file() and f.name.endswith(LINK_SUFFIX):
+            info = read_link(f)
+            if info['name']:
+                out[info['name']] = info
+    return out
+
+
+def resolve_served_path(name: str):
+    """
+    Where the bytes for `name` live: the artifacts folder, a link target, or an
+    unsaved paste. Returns (path, error). A real file always wins over a
+    pointer, and a saved artifact wins over an unsaved one of the same name.
+    """
+    direct = ROOT / name
+    try:
+        if direct.is_file() and direct.resolve().is_relative_to(ROOT.resolve()):
+            return direct, None
+    except ValueError:
+        return None, 'outside the artifacts folder'
+    pointer = ROOT / (name + LINK_SUFFIX)
+    if pointer.is_file():
+        info = read_link(pointer)
+        if info['error']:
+            return None, info['error']
+        return info['target'], None
+    # Not saved to the gallery yet.
+    if name in unsaved_names():
+        why = unsaved_error(name)
+        if why:
+            return None, why
+        got = unsaved_path(name)
+        return (got, None) if got else (None, 'the pasted file is unreadable')
+    return None, None              # plain 404, not a link problem
+
+
 # ── Insertion-order index ──────────────────────────────────────────────
 # artifacts.json stores a list of filenames in insertion order (oldest first).
 # The /list endpoint reverses it so newest appears at the top of the gallery.
@@ -227,9 +344,27 @@ def ordered_files() -> list[dict]:
     on_disk = {
         f.name: int(f.stat().st_mtime * 1000)
         for f in ROOT.iterdir()
-        # .tmp is an in-flight atomic write, not an artifact
+        # .tmp is an in-flight atomic write, not an artifact; .link is the
+        # pointer, listed below under the name of the asset it points at.
         if f.is_file() and f.name not in SKIP and not f.name.endswith('.tmp')
+        and not f.name.endswith(LINK_SUFFIX)
     }
+
+    # Linked assets. The date is the target's, so grouping by date describes
+    # the asset rather than when the pointer was written.
+    links = link_pointers()
+    for name, info in links.items():
+        if name in on_disk:
+            continue               # a real file of that name wins
+        when = None
+        if info['target'] and not info['error']:
+            try:
+                when = int(info['target'].stat().st_mtime * 1000)
+            except OSError:
+                pass
+        if when is None:
+            when = int((ROOT / info['pointer']).stat().st_mtime * 1000)
+        on_disk[name] = when
 
     # Files known to the index, still present on disk
     indexed = [
@@ -248,9 +383,165 @@ def ordered_files() -> list[dict]:
     # Combine: unindexed (oldest) + indexed (in arrival order), then reverse
     combined = unindexed + indexed
     combined.reverse()   # newest first
+    # Unsaved pastes sit at the top: they are the thing the user is looking
+    # at and the thing that disappears if they walk away.
+    for entry in unsaved_entries():
+        combined.insert(0, entry)
+
     for f in combined:
         f['thumbnail_mtime'] = thumbnail_mtime(f['name'])
+        info = links.get(f['name'])
+        if info:
+            # The gallery says so on the card, and the delete wording changes:
+            # removing a linked artifact removes the pointer, not the asset.
+            f['linked'] = True
+            f['link_target'] = str(info['target']) if info['target'] else None
+            f['link_error'] = info['error']
     return combined
+
+
+# ── Unsaved pastes ─────────────────────────────────────────────────────
+
+def unsaved_names() -> set:
+    if not UNSAVED_DIR.is_dir():
+        return set()
+    out = set()
+    for f in UNSAVED_DIR.iterdir():
+        if not f.is_file():
+            continue
+        out.add(f.name[:-len(LINK_SUFFIX)] if f.name.endswith(LINK_SUFFIX) else f.name)
+    return out
+
+
+def unsaved_entries() -> list:
+    """List entries for every unsaved paste, newest first."""
+    rows = []
+    for name in unsaved_names():
+        direct = UNSAVED_DIR / name
+        pointer = UNSAVED_DIR / (name + LINK_SUFFIX)
+        row = {'name': name, 'unsaved': True}
+        if direct.is_file():
+            row['mtime'] = int(direct.stat().st_mtime * 1000)
+        elif pointer.is_file():
+            info = read_link(pointer)
+            row['linked'] = True
+            row['link_target'] = str(info['target']) if info['target'] else None
+            row['link_error'] = info['error']
+            when = None
+            if info['target'] and not info['error']:
+                try:
+                    when = int(info['target'].stat().st_mtime * 1000)
+                except OSError:
+                    pass
+            row['mtime'] = when if when is not None else int(pointer.stat().st_mtime * 1000)
+        else:
+            continue
+        rows.append(row)
+    rows.sort(key=lambda r: r['mtime'], reverse=True)
+    return rows
+
+
+def unsaved_path(name: str):
+    """Where an unsaved paste's bytes are, or None."""
+    direct = UNSAVED_DIR / name
+    if direct.is_file():
+        return direct
+    pointer = UNSAVED_DIR / (name + LINK_SUFFIX)
+    if pointer.is_file():
+        info = read_link(pointer)
+        return None if info['error'] else info['target']
+    return None
+
+
+def unsaved_error(name: str):
+    pointer = UNSAVED_DIR / (name + LINK_SUFFIX)
+    if pointer.is_file():
+        return read_link(pointer)['error']
+    return None
+
+
+def free_artifact_name(name: str, *folders: Path) -> str:
+    """
+    A name not taken in any of `folders`, appending -1, -2 and so on.
+
+    A paste has to clear the artifacts folder as well as .unsaved/, because a
+    registered artifact of the same name wins when the bytes are looked up --
+    so a paste named only against .unsaved/ would be invisible.
+    """
+    def taken(candidate: str) -> bool:
+        return any((f / candidate).exists() or (f / (candidate + LINK_SUFFIX)).exists()
+                   for f in folders)
+
+    if not taken(name):
+        return name
+    stem, dot, ext = name.rpartition('.')
+    n = 1
+    while True:
+        candidate = f'{stem}-{n}{dot}{ext}' if dot else f'{name}-{n}'
+        if not taken(candidate):
+            return candidate
+        n += 1
+
+
+def same_bytes(a: Path, b: Path) -> bool:
+    """Are these two files byte-identical? Size first, so most calls are cheap."""
+    try:
+        if a.stat().st_size != b.stat().st_size:
+            return False
+    except OSError:
+        return False
+    import hashlib
+    def digest(f: Path) -> str:
+        h = hashlib.sha256()
+        with f.open('rb') as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b''):
+                h.update(chunk)
+        return h.hexdigest()
+    try:
+        return digest(a) == digest(b)
+    except OSError:
+        return False
+
+
+def paste_conflict(staged_name: str, wanted_name: str):
+    """
+    Does a registered artifact already hold the name this paste asked for?
+
+    Returns None when the name was free, otherwise the registered name and
+    whether the content matches -- because "replace it" is worth offering for
+    a newer version and pointless for an identical copy.
+    """
+    # A name taken by another unsaved paste is not a clash: nothing registered
+    # is at risk, and the second paste simply gets its own name. This also
+    # covers the case where the name was free, since then the folder cannot
+    # hold it either.
+    if not ((ROOT / wanted_name).is_file() or (ROOT / (wanted_name + LINK_SUFFIX)).is_file()):
+        return None
+    staged = unsaved_path(staged_name)
+    existing, why = resolve_served_path(wanted_name)
+    identical = bool(staged and existing and not why and same_bytes(staged, existing))
+    return {'with': wanted_name, 'identical': identical}
+
+
+def discard_unsaved(names) -> list:
+    """Remove unsaved pastes. A pointer here never touches its target."""
+    gone = []
+    for name in names:
+        hit = False
+        for candidate in (UNSAVED_DIR / name, UNSAVED_DIR / (name + LINK_SUFFIX)):
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            if not resolved.is_relative_to(UNSAVED_DIR.resolve()):
+                continue
+            if candidate.is_file():
+                candidate.unlink()
+                hit = True
+        if hit:
+            thumbnail_path(name).unlink(missing_ok=True)
+            gone.append(name)
+    return gone
 
 
 # ── Update check ─────────────────────────────────────────────
@@ -314,6 +605,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 fpath = (ROOT / fname).resolve()
                 if not fpath.is_relative_to(ROOT.resolve()) or fname in SKIP:
                     self.send_error(403); return
+                if fname.endswith(LINK_SUFFIX):
+                    # Artifacts run same-origin and can reach this endpoint, so
+                    # a pointer minted here could name any file on the machine
+                    # and then be read back. Pointers are written to disk only.
+                    self.send_error(403, 'a link file cannot be created over HTTP')
+                    return
                 # Keep the old content before replacing it, so the edit is undoable
                 snapshot(fname)
                 atomic_write_text(fpath, content)
@@ -365,6 +662,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         fpath.unlink()
                         thumbnail_path(fname).unlink(missing_ok=True)
                         deleted.append(fname)
+                        continue
+                    # A linked artifact: drop the pointer and leave the asset
+                    # where its project keeps it.
+                    pointer = ROOT / (fname + LINK_SUFFIX)
+                    if pointer.is_file():
+                        pointer.unlink()
+                        thumbnail_path(fname).unlink(missing_ok=True)
+                        deleted.append(fname)
+                        log.info('removed link %s (asset untouched)', fname)
                 with _index_lock:
                     order = load_index()
                     order = [n for n in order if n not in deleted]
@@ -383,19 +689,164 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body = json.loads(self.rfile.read(length))
                 fname = body.get('file', '')
                 data_url = body.get('data', '')
-                if not fname or not data_url or fname in SKIP:
+                if (not fname or not data_url or fname in SKIP
+                        or fname.endswith(LINK_SUFFIX)):
                     self.send_error(400); return
-                artifact = (ROOT / fname).resolve()
+                # Resolve through a pointer: a linked video has no file of its
+                # own name in the folder, and requiring one refused its
+                # thumbnail with a 403 and left the card without a picture.
+                source, why = resolve_served_path(fname)
                 target = thumbnail_path(fname).resolve()
-                if (not artifact.is_relative_to(ROOT.resolve()) or not artifact.is_file()
+                if (source is None or why
                         or not target.is_relative_to(THUMBNAIL_DIR.resolve())):
-                    self.send_error(403); return
+                    self.send_error(403, why or 'no such artifact'); return
                 THUMBNAIL_DIR.mkdir(exist_ok=True)
                 png_data = base64.b64decode(data_url.split(',', 1)[1])
                 atomic_write_bytes(target, png_data)
                 self._json({'file': fname, 'thumbnail_mtime': thumbnail_mtime(fname)})
             except Exception as e:
                 log.error('thumbnail save failed\n%s', traceback.format_exc())
+                self.send_error(500, str(e))
+
+        elif path == '/paste':
+            # Hold pasted content without registering it. Bytes are written
+            # into .unsaved/; a pasted path becomes a pointer there.
+            try:
+                import base64
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length))
+                raw_name = body.get('name', '')
+                if ('/' in raw_name or '\\' in raw_name or raw_name in ('.', '..')
+                        or not raw_name or raw_name in SKIP):
+                    self.send_error(400, 'bad name'); return
+                UNSAVED_DIR.mkdir(exist_ok=True)
+                wanted = os.path.basename(raw_name)
+                name = free_artifact_name(wanted, UNSAVED_DIR, ROOT)
+
+                if body.get('path'):
+                    # A pasted path is served straight from where it lives, so
+                    # it previews at once. Restricted to media extensions: this
+                    # endpoint is reachable by an artifact's own script, and a
+                    # media-only rule keeps that from reaching anything else.
+                    ext = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+                    if ext not in PASTE_LINK_EXT:
+                        self.send_error(403, f'.{ext} cannot be linked by pasting a path')
+                        return
+                    target = Path(os.path.expandvars(body['path'])).expanduser()
+                    if not target.is_absolute():
+                        self.send_error(400, 'not an absolute path'); return
+                    ok, why = is_local_fixed_path(target)
+                    if not ok:
+                        self.send_error(403, f'refused, {why}'); return
+                    if not target.is_file():
+                        self.send_error(404, f'no such file: {target}'); return
+                    atomic_write_text(UNSAVED_DIR / (name + LINK_SUFFIX),
+                                      f'# pasted path, not yet saved\n{target}\n')
+                    log.info('pasted link %s -> %s', name, target)
+                else:
+                    data_url = body.get('data', '')
+                    if not data_url:
+                        self.send_error(400, 'nothing to paste'); return
+                    payload = base64.b64decode(data_url.split(',', 1)[1])
+                    atomic_write_bytes(UNSAVED_DIR / name, payload)
+                    log.info('pasted %s (%d bytes, unsaved)', name, len(payload))
+                reply = {'name': name, 'unsaved': True}
+                clash = paste_conflict(name, wanted)
+                if clash:
+                    reply['conflict'] = clash
+                    log.info('pasted %s collides with %s (identical=%s)',
+                             name, clash['with'], clash['identical'])
+                self._json(reply)
+            except Exception as e:
+                log.error('paste failed\n%s', traceback.format_exc())
+                self.send_error(500, str(e))
+
+        elif path == '/unsaved/keep':
+            # Save to gallery: move out of .unsaved/ and register it.
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length))
+                name = body.get('file', '')
+                if name not in unsaved_names():
+                    self.send_error(404, 'not an unsaved paste'); return
+                final = free_artifact_name(name, ROOT)
+                moved = None
+                for suffix in ('', LINK_SUFFIX):
+                    src = UNSAVED_DIR / (name + suffix)
+                    if src.is_file():
+                        os.replace(src, ROOT / (final + suffix))
+                        moved = final + suffix
+                if moved is None:
+                    self.send_error(404, 'nothing to save'); return
+                if final != name:
+                    thumbnail_path(name).unlink(missing_ok=True)
+                else:
+                    old = thumbnail_path(name)
+                    if old.is_file():
+                        os.replace(old, thumbnail_path(final))
+                register_file(final)
+                with _clients_lock:
+                    for q in _clients:
+                        q.put(final)
+                log.info('saved pasted artifact as %s', final)
+                self._json({'saved': final, 'was': name})
+            except Exception as e:
+                log.error('keep failed\n%s', traceback.format_exc())
+                self.send_error(500, str(e))
+
+        elif path == '/unsaved/replace':
+            # Overwrite a registered artifact with a paste. Snapshotted first,
+            # so this lands in the same history as an edit and can be undone.
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length))
+                staged = body.get('file', '')
+                target = body.get('target', '')
+                if staged not in unsaved_names():
+                    self.send_error(404, 'not an unsaved paste'); return
+                if target in SKIP or '/' in target or '\\' in target:
+                    self.send_error(400, 'bad target'); return
+                dest = (ROOT / target).resolve()
+                if not dest.is_relative_to(ROOT.resolve()):
+                    self.send_error(403); return
+                direct = UNSAVED_DIR / staged
+                pointer = UNSAVED_DIR / (staged + LINK_SUFFIX)
+                if not (direct.is_file() or pointer.is_file()):
+                    self.send_error(404, 'nothing to replace with'); return
+
+                snapshot(target)
+                # Whichever form the old artifact had, it goes: replacing a
+                # file with a link (or the reverse) must not leave both.
+                (ROOT / target).unlink(missing_ok=True)
+                (ROOT / (target + LINK_SUFFIX)).unlink(missing_ok=True)
+                if direct.is_file():
+                    os.replace(direct, ROOT / target)
+                else:
+                    os.replace(pointer, ROOT / (target + LINK_SUFFIX))
+                thumbnail_path(staged).unlink(missing_ok=True)
+                thumbnail_path(target).unlink(missing_ok=True)
+                register_file(target)
+                with _clients_lock:
+                    for q in _clients:
+                        q.put(target)
+                log.info('replaced %s with pasted %s', target, staged)
+                self._json({'replaced': target, 'from': staged,
+                            'undoable': bool(history_list(target))})
+            except Exception as e:
+                log.error('replace failed\n%s', traceback.format_exc())
+                self.send_error(500, str(e))
+
+        elif path == '/unsaved/discard':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length)) if length else {}
+                names = sorted(unsaved_names()) if body.get('all') else body.get('files', [])
+                gone = discard_unsaved(names)
+                if gone:
+                    log.info('discarded unsaved %s', ', '.join(gone))
+                self._json({'discarded': gone})
+            except Exception as e:
+                log.error('discard failed\n%s', traceback.format_exc())
                 self.send_error(500, str(e))
 
         elif path == '/import':
@@ -414,6 +865,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         continue
                     fname = os.path.basename(raw_name)
                     if not fname or not data_url or fname in SKIP:
+                        continue
+                    if fname.endswith(LINK_SUFFIX):
+                        log.info('refused imported link file: %s', fname)
                         continue
                     fpath = (ROOT / fname).resolve()
                     if not fpath.is_relative_to(ROOT.resolve()):
@@ -508,17 +962,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404)
 
         elif path.startswith('/files/'):
-            name = path[7:]
-            fpath = ROOT / name
-            try:
-                if not fpath.resolve().is_relative_to(ROOT.resolve()):
-                    self.send_error(403); return
-            except ValueError:
-                self.send_error(403); return
-            if not fpath.is_file():
-                self.send_error(404); return
-            self.serve_file(fpath, guess_mime(name))
+            self.serve_artifact(path[7:])
 
+        else:
+            self.send_error(404)
+
+    def serve_artifact(self, name: str, head_only: bool = False):
+        """Serve an artifact, whether it sits in the folder or behind a link."""
+        fpath, why = resolve_served_path(name)
+        if why:
+            # Say what is wrong with the link rather than return a bare 404.
+            log.info('link unavailable for %s: %s', name, why)
+            self.send_error(409, why)
+            return
+        if fpath is None:
+            self.send_error(404); return
+        self.serve_file(fpath, guess_mime(name), head_only=head_only)
+
+    def do_HEAD(self):
+        """Some players probe with HEAD before requesting ranges."""
+        parsed = urllib.parse.urlparse(self.path)
+        path = urllib.parse.unquote(parsed.path)
+        if path.startswith('/files/'):
+            self.serve_artifact(path[7:], head_only=True)
+        elif path in ('/', '/gallery.html'):
+            self.serve_file(GALLERY_HTML, 'text/html', head_only=True)
         else:
             self.send_error(404)
 
@@ -536,18 +1004,64 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def serve_file(self, fpath: Path, mime: str):
+    def serve_file(self, fpath: Path, mime: str, head_only: bool = False):
+        """
+        Stream a file, honouring Range.
+
+        This used to read the whole file into memory and ignore Range, which
+        meant a 45 MB wav was read in full on every request and a video could
+        not be seeked at all -- a player asks for a byte range and needs 206
+        with Content-Range to scrub.
+        """
         try:
-            data = fpath.read_bytes()
-            self.send_response(200)
-            self.send_header('Content-Type', mime)
-            self.send_header('Content-Length', len(data))
-            self.end_headers()
-            self.wfile.write(data)
+            size = fpath.stat().st_size
         except FileNotFoundError:
-            self.send_error(404)
+            self.send_error(404); return
+        except OSError as e:
+            log.error('cannot stat %s: %s', fpath, e)
+            self.send_error(500); return
+
+        start, end = 0, size - 1
+        partial = False
+        rng = self.headers.get('Range')
+        if rng and size:
+            got = parse_byte_range(rng, size)
+            if got is None:
+                self.send_response(416)
+                self.send_header('Content-Range', f'bytes */{size}')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
+            start, end = got
+            partial = True
+
+        length = 0 if size == 0 else end - start + 1
+        self.send_response(206 if partial else 200)
+        self.send_header('Content-Type', mime)
+        self.send_header('Content-Length', str(length))
+        # Without this a player will not attempt to seek at all.
+        self.send_header('Accept-Ranges', 'bytes')
+        if partial:
+            self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+        self.end_headers()
+        if head_only or not length:
+            return
+
+        try:
+            with fpath.open('rb') as fh:
+                fh.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = fh.read(min(STREAM_CHUNK, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Normal: the player seeked elsewhere or the tab moved on.
+            pass
         except Exception:
-            self.send_error(500)
+            log.error('while streaming %s\n%s', fpath, traceback.format_exc())
 
 
 def heartbeat():
@@ -557,6 +1071,37 @@ def heartbeat():
         with _clients_lock:
             for q in _clients:
                 q.put('__ping__')
+
+
+STREAM_CHUNK = 256 * 1024
+
+
+def parse_byte_range(header: str, size: int):
+    """
+    `Range: bytes=...` -> (start, end) inclusive, or None if unsatisfiable.
+    Only a single range is honoured; a multi-range request falls back to its
+    first range, which is what players actually send.
+    """
+    if not header or not header.strip().lower().startswith('bytes='):
+        return None
+    spec = header.split('=', 1)[1].split(',')[0].strip()
+    if '-' not in spec:
+        return None
+    lo, _, hi = spec.partition('-')
+    try:
+        if not lo:                      # bytes=-N  -> the final N bytes
+            n = int(hi)
+            if n <= 0:
+                return None
+            start = max(0, size - n)
+            return start, size - 1
+        start = int(lo)
+        end = int(hi) if hi else size - 1
+    except ValueError:
+        return None
+    if start >= size or start < 0 or end < start:
+        return None
+    return start, min(end, size - 1)
 
 
 def guess_mime(name: str) -> str:
@@ -579,7 +1124,26 @@ def guess_mime(name: str) -> str:
         'yml':  'text/plain; charset=utf-8',
         'mermaid': 'text/plain; charset=utf-8',
         'mmd':  'text/plain; charset=utf-8',
+        'srt':  'text/plain; charset=utf-8',
+        # Creative assets. Served with Range support, so they seek and stream
+        # rather than being loaded whole.
+        'mp4':  'video/mp4',   'm4v': 'video/mp4',
+        'webm': 'video/webm',  'mov': 'video/quicktime',
+        'mkv':  'video/x-matroska',
+        'mp3':  'audio/mpeg',  'wav': 'audio/wav',
+        'm4a':  'audio/mp4',   'aac': 'audio/aac',
+        'ogg':  'audio/ogg',   'flac': 'audio/flac',
     }.get(ext, 'application/octet-stream')
+
+
+MEDIA_EXT = {'mp4', 'm4v', 'webm', 'mov', 'mkv',
+             'mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'}
+
+# A pasted path is turned into a pointer over HTTP, and this endpoint is
+# reachable by an artifact's own script. Restricting it to creative assets
+# means the worst an abuser gets is a media file, never a credential or a
+# config. Pointers for anything else are still written to disk only.
+PASTE_LINK_EXT = MEDIA_EXT | {'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'}
 
 
 if __name__ == '__main__':

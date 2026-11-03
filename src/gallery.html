@@ -275,6 +275,142 @@
   .type-mmd { background: oklch(92% 0.06 330); color: oklch(42% 0.14 330); }
   .type-txt { background: oklch(94% 0.02 260); color: oklch(45% 0.03 260); }
   .type-file { background: oklch(94% 0.01 260); color: oklch(50% 0.02 260); }
+  .type-video { background: oklch(92% 0.06 310); color: oklch(42% 0.16 310); }
+  .type-audio { background: oklch(92% 0.07 200); color: oklch(40% 0.14 200); }
+
+  /* Media players fill the preview area without overflowing it. */
+  .detail-preview > video {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    background: oklch(18% 0.01 260);
+    display: block;
+  }
+  .audio-stage {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    background: var(--paper-warm);
+    padding: 40px;
+  }
+  .audio-stage .audio-name {
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--ink);
+    text-align: center;
+    word-break: break-word;
+  }
+  .audio-stage audio { width: min(560px, 100%); }
+
+  /* A linked asset lives outside the artifacts folder. */
+  .link-badge {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent-2);
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: 2px 9px;
+    white-space: nowrap;
+  }
+  .card .link-mark {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 4;
+    font-family: var(--mono);
+    font-size: 11px;
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: 2px 8px;
+    color: var(--accent-2);
+  }
+  .link-path {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink-faint);
+    word-break: break-all;
+  }
+  /* Unsaved paste: visibly provisional, so it is never mistaken for a
+     registered artifact. */
+  .card.unsaved { border-color: var(--accent); box-shadow: 0 0 0 2px oklch(58% 0.19 28 / 0.18); }
+  .card .unsaved-mark {
+    position: absolute;
+    top: 10px;
+    left: 38px;
+    z-index: 4;
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    background: var(--accent);
+    color: white;
+    border-radius: 999px;
+    padding: 2px 9px;
+  }
+  .unsaved-badge {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+    background: var(--accent);
+    border-radius: 999px;
+    padding: 3px 10px;
+    white-space: nowrap;
+  }
+
+  /* Leave guard */
+  #leave-guard {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: oklch(22% 0.03 260 / 0.45);
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  #leave-guard.visible { display: flex; }
+  #leave-guard .guard-box {
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    box-shadow: var(--card-shadow-hover);
+    max-width: 520px;
+    padding: 28px 30px;
+  }
+  #leave-guard h2 {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 400;
+    margin-bottom: 10px;
+    color: var(--ink);
+  }
+  #leave-guard p { font-size: 15px; line-height: 1.6; color: var(--ink-soft); }
+  #leave-guard .guard-list {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink);
+    margin: 14px 0 4px;
+  }
+  #leave-guard .guard-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 22px;
+    flex-wrap: wrap;
+  }
+
+  .link-broken {
+    padding: 28px 32px;
+    color: var(--danger);
+    font-size: 15px;
+    line-height: 1.6;
+  }
 
   .card-info {
     padding: 14px 16px;
@@ -889,6 +1025,9 @@
     <button class="back-btn" onclick="goHome()">&#8592; Back</button>
     <button class="hamburger" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
     <span class="detail-filename" id="detail-filename"></span>
+    <span class="link-badge" id="link-badge" style="display:none"></span>
+    <span class="unsaved-badge" id="unsaved-badge" style="display:none">Unsaved</span>
+    <button class="toolbar-btn primary" id="keep-btn" onclick="keepUnsaved()" style="display:none">Save to gallery</button>
     <span class="save-status" id="save-status"></span>
     <button class="toolbar-btn" id="preview-btn" onclick="togglePreviewOnly()" style="display:none">Preview</button>
     <button class="toolbar-btn" id="edit-btn" onclick="toggleEdit()" style="display:none">Edit</button>
@@ -922,6 +1061,15 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<div id="leave-guard">
+  <div class="guard-box">
+    <h2 id="guard-title">Save your pasted content?</h2>
+    <p id="guard-why"></p>
+    <div class="guard-list" id="guard-list"></div>
+    <div class="guard-actions" id="guard-actions"></div>
+  </div>
+</div>
+
 <div id="drop-overlay">
   <div class="drop-box">
     <div class="drop-icon">&#8681;</div>
@@ -991,6 +1139,232 @@
       status.style.color = 'var(--danger)';
       setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 4000);
     }
+  }
+
+  // ── Paste anywhere ────────────────────────────────────────────────
+  // Pasted content becomes an unsaved artifact: previewable at once, but not
+  // registered, and gone when the gallery is left. A pasted path is linked
+  // rather than copied, which is why it can only be a creative asset -- this
+  // endpoint is reachable by an artifact's own script, and the media-only
+  // rule keeps that from reaching anything else on disk.
+
+  const PASTE_LINK_EXT = ['mp4','m4v','webm','mov','mkv',
+                          'mp3','wav','m4a','aac','ogg','flac',
+                          'png','jpg','jpeg','gif','webp','svg'];
+
+  // Returns { path, name } when it can be linked, { unsupported: ext } when it
+  // is clearly a path but not a creative asset, or null when it is just text.
+  function looksLikeLocalPath(text) {
+    const t = text.trim().replace(/^"|"$/g, '');
+    if (/\r?\n/.test(t)) return null;                 // a single line only
+    const windows = /^[a-zA-Z]:[\\/]/.test(t);
+    const unix = t.startsWith('/');
+    if (!windows && !unix) return null;
+    const base = t.split(/[\\/]/).pop();
+    const ext = base.includes('.') ? base.split('.').pop().toLowerCase() : '';
+    if (!ext) return null;
+    if (!PASTE_LINK_EXT.includes(ext)) return { unsupported: ext, name: base };
+    return { path: t, name: base };
+  }
+
+  function pastedTextName(text) {
+    // A heading makes a better filename than a timestamp.
+    const head = (text.trim().split(/\r?\n/)[0] || '').replace(/^#+\s*/, '');
+    const slug = head.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+                     .replace(/^-|-$/g, '').slice(0, 48);
+    return (slug || 'pasted-' + Date.now()) + '.md';
+  }
+
+  async function postPaste(payload) {
+    const res = await fetch('/paste', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error((await res.text()).trim() || ('HTTP ' + res.status));
+    return await res.json();          // { name, unsaved, conflict? }
+  }
+
+  async function handlePaste(e) {
+    if (editMode) return;                       // the editor owns its own paste
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const cb = e.clipboardData;
+    if (!cb) return;
+
+    const files = Array.from(cb.files || []);
+    const text = cb.getData('text/plain') || '';
+    if (!files.length && !text.trim()) return;
+
+    e.preventDefault();
+    const status = document.getElementById('import-status');
+    status.textContent = 'Pasting...';
+    status.style.color = '';
+    try {
+      const made = [];
+      if (files.length) {
+        // Copying a file in Explorer puts the bytes on the clipboard, so this
+        // needs no path and no link.
+        const payloads = await Promise.all(files.map(readFileAsDataURL));
+        for (const f of payloads) made.push(await postPaste(f));
+      } else {
+        const asPath = looksLikeLocalPath(text);
+        if (asPath && asPath.unsupported) {
+          // Saving the path as a note would be junk named after a file path.
+          status.textContent = 'Only images, video and audio can be linked by '
+                             + 'pasting a path (.' + asPath.unsupported + ' cannot). '
+                             + 'Copy the file itself to bring it in.';
+          status.style.color = 'var(--ink-faint)';
+          setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 8000);
+          return;
+        }
+        if (asPath) {
+          made.push(await postPaste(asPath));
+        } else {
+          const blob = new Blob([text], { type: 'text/plain' });
+          const data = await new Promise(r => {
+            const fr = new FileReader();
+            fr.onload = () => r(fr.result);
+            fr.readAsDataURL(blob);
+          });
+          made.push(await postPaste({ name: pastedTextName(text), data }));
+        }
+      }
+      status.textContent = '';
+      await loadFiles();
+
+      // Open it straight away, so pasting feels like paste-and-preview.
+      let last = made[made.length - 1];
+      let entry = files_byName(last.name);
+      if (entry) openDetail(entry);
+
+      // A collision is a decision only the user can make: they may be holding
+      // a newer version, or may just want a look at a duplicate.
+      for (const result of made) {
+        if (!result.conflict) continue;
+        const answer = await askAboutConflict(result.name, result.conflict);
+        if (answer === 'replace') {
+          const replaced = await replaceWithPaste(result.name, result.conflict['with']);
+          const target = replaced && files_byName(replaced);
+          if (target) openDetail(target);
+        } else if (answer === 'discard') {
+          await discardUnsaved([result.name]);
+          if (activeFile && activeFile.name === result.name) goHomeWithoutAsking();
+        }
+        // 'unsaved' leaves it exactly as staged.
+      }
+    } catch (err) {
+      status.textContent = 'Paste failed: ' + err.message;
+      status.style.color = 'var(--danger)';
+      setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 6000);
+    }
+  }
+
+  function files_byName(name) { return files.find(f => f.name === name); }
+
+  function unsavedList() { return files.filter(f => f.unsaved).map(f => f.name); }
+
+  // ── Save, discard, and the guard on leaving ───────────────────────
+
+  async function keepUnsaved(name) {
+    const target = name || (activeFile && activeFile.name);
+    if (!target) return;
+    const res = await fetch('/unsaved/keep', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: target })
+    });
+    if (!res.ok) { alert('Could not save: ' + (await res.text())); return null; }
+    const { saved } = await res.json();
+    await loadFiles();
+    if (activeFile && activeFile.name === target) {
+      const entry = files_byName(saved);
+      if (entry) { activeFile = entry; openDetail(entry); }
+    }
+    return saved;
+  }
+
+  async function discardUnsaved(names) {
+    await fetch('/unsaved/discard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(names ? { files: names } : { all: true })
+    });
+    await loadFiles();
+  }
+
+  // One dialog for every question about a paste. `choices` is [value, label,
+  // primary?] in display order, and the promise resolves to the value chosen.
+  function askAboutPaste({ title, why, list, choices }) {
+    return new Promise(resolve => {
+      const guard = document.getElementById('leave-guard');
+      document.getElementById('guard-title').textContent = title;
+      document.getElementById('guard-why').textContent = why;
+      document.getElementById('guard-list').textContent = (list || []).join('\n');
+      const actions = document.getElementById('guard-actions');
+      actions.innerHTML = '';
+      const finish = (answer) => {
+        guard.classList.remove('visible');
+        actions.innerHTML = '';
+        resolve(answer);
+      };
+      choices.forEach(([value, label, primary]) => {
+        const b = document.createElement('button');
+        b.className = 'toolbar-btn' + (primary ? ' primary' : '');
+        b.id = 'guard-' + value;
+        b.textContent = label;
+        b.onclick = () => finish(value);
+        actions.appendChild(b);
+      });
+      guard.classList.add('visible');
+    });
+  }
+
+  // Resolves to 'save' | 'discard' | 'stay'.
+  function askAboutUnsaved(names) {
+    return askAboutPaste({
+      title: 'Save your pasted content?',
+      why: names.length === 1
+        ? 'Your pasted content is not a registered artifact, and it will be lost if you leave.'
+        : 'Your ' + names.length + ' pasted items are not registered artifacts, and they will be lost if you leave.',
+      list: names,
+      choices: [['stay', 'Stay here'], ['discard', 'Discard'],
+                ['save', 'Save to gallery', true]],
+    });
+  }
+
+  // A paste that wants a name the gallery already uses. Resolves to
+  // 'replace' | 'unsaved' | 'discard'.
+  function askAboutConflict(staged, clash) {
+    const identical = clash.identical;
+    const choices = [['discard', 'Discard']];
+    choices.push(['unsaved', identical ? 'Look at it anyway' : 'Keep as unsaved']);
+    // Replacing byte-identical content changes nothing, so it is not offered.
+    if (!identical) choices.push(['replace', 'Replace it', true]);
+    return askAboutPaste({
+      title: 'Already in the gallery',
+      why: 'An artifact called ' + clash['with'] + ' is already registered. '
+         + (identical
+              ? 'What you pasted is identical to it, so replacing it would change nothing. '
+                + 'Looking at it keeps your paste as unsaved, and it goes when you leave.'
+              : 'What you pasted is different. Replacing keeps the name and the place in '
+                + 'the gallery, and the old version stays in history so it can be undone. '
+                + 'Keeping it as unsaved leaves the registered one alone.'),
+      list: [clash['with']],
+      choices,
+    });
+  }
+
+  async function replaceWithPaste(staged, target) {
+    const res = await fetch('/unsaved/replace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: staged, target })
+    });
+    if (!res.ok) { alert('Could not replace: ' + (await res.text())); return null; }
+    const { replaced } = await res.json();
+    await loadFiles();
+    return replaced;
   }
 
   function handleImportInput(e) {
@@ -1072,7 +1446,9 @@
       png:'img', jpg:'img', jpeg:'img', gif:'img', webp:'img',
       md:'md', json:'json', py:'py', js:'js', ts:'ts', css:'css',
       csv:'csv', xml:'xml', yaml:'yaml', yml:'yaml',
-      mermaid:'mmd', mmd:'mmd', txt:'txt'
+      mermaid:'mmd', mmd:'mmd', txt:'txt', srt:'txt',
+      mp4:'video', m4v:'video', webm:'video', mov:'video', mkv:'video',
+      mp3:'audio', wav:'audio', m4a:'audio', aac:'audio', ogg:'audio', flac:'audio'
     };
     return map[e] || 'file';
   }
@@ -1247,13 +1623,32 @@
 
     const ext = getExt(f.name);
     const type = getType(f.name);
+    if (f.unsaved) {
+      card.classList.add('unsaved');
+      const u = document.createElement('span');
+      u.className = 'unsaved-mark';
+      u.textContent = 'UNSAVED';
+      u.title = 'Pasted in. Open it and choose Save to gallery to keep it.';
+      card.appendChild(u);
+    }
+    if (f.linked) {
+      const mark = document.createElement('span');
+      mark.className = 'link-mark';
+      mark.textContent = f.link_error ? 'link broken' : 'link';
+      mark.title = f.link_error || ('Lives at ' + (f.link_target || 'another folder'));
+      card.appendChild(mark);
+    }
     const preview = document.createElement('div');
     preview.className = 'card-preview';
 
-    if (THUMBNAIL_EXT.includes(ext) && thumbnailMtimeByName.has(f.name)) {
+    if (FRAME_THUMBNAIL_EXT.includes(ext) && thumbnailMtimeByName.has(f.name)) {
       // Last capture, however old. Rendering every document on load is what
       // made startup slow; opening an artifact is what refreshes this.
       preview.appendChild(thumbnailImg(f.name));
+    } else if (VIDEO_EXT.includes(ext) && !f.link_error) {
+      // Never captured yet: badge now, real frame once it scrolls into view.
+      preview.innerHTML = '<div class="card-icon"><span class="type-badge type-' + type + '">.' + ext + '</span></div>';
+      captureWhenVisible(f.name, preview);
     } else if (THUMBNAIL_EXT.includes(ext) && haveLib('htmlToImage')) {
       // Never captured: show the type badge, capture once it scrolls into view.
       preview.innerHTML = '<div class="card-icon"><span class="type-badge type-' + type + '">.' + ext + '</span></div>';
@@ -1542,7 +1937,7 @@
     // renderGrid() appended a second card beside it.
     const cached = cardCache.get(fname);
     if (cached) cached.mtime = -1;
-    if (THUMBNAIL_EXT.includes(getExt(fname))) queueThumbnailCapture(fname, true);
+    if (FRAME_THUMBNAIL_EXT.includes(getExt(fname))) queueThumbnailCapture(fname, true);
   }
 
   // ── Card thumbnails ───────────────────────────────────────────────
@@ -1553,6 +1948,11 @@
   // never competes with what the user is looking at.
 
   const THUMBNAIL_EXT = ['html', 'htm'];
+  // A video gets its card picture from a real frame, so the queue has two
+  // kinds of capture; audio has no frame and keeps its type badge.
+  const VIDEO_EXT = ['mp4', 'm4v', 'webm', 'mov', 'mkv'];
+  const AUDIO_EXT = ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'];
+  const FRAME_THUMBNAIL_EXT = THUMBNAIL_EXT.concat(VIDEO_EXT);
   const THUMBNAIL_VIEWPORT = { width: 720, height: 400 };  // ~2x a card, so it stays sharp
   const thumbnailMtimeByName = new Map();   // artifact name -> epoch ms of its capture
   const thumbnailQueue = [];
@@ -1585,7 +1985,13 @@
   // urgent: the user just opened or changed this artifact, so it jumps the
   // queue ahead of never-captured cards that merely scrolled into view.
   function queueThumbnailCapture(fname, urgent) {
-    if (!haveLib('htmlToImage')) return;
+    // A link whose target is unreachable has nothing to capture; asking anyway
+    // costs a request that can only 409. Checked here so every caller is
+    // covered rather than each one remembering.
+    const entry = files.find(f => f.name === fname);
+    if (entry && entry.link_error) return;
+    // Video frames need no rasteriser; only the document path does.
+    if (!haveLib('htmlToImage') && !VIDEO_EXT.includes(getExt(fname))) return;
     if (fname === thumbnailCapturingName) { thumbnailRecapture.add(fname); return; }
     if (thumbnailQueued.has(fname)) {
       if (urgent) {   // promote an already-queued background capture
@@ -1621,6 +2027,55 @@
   }
 
   function captureThumbnail(fname) {
+    return VIDEO_EXT.includes(getExt(fname))
+      ? captureVideoFrame(fname)
+      : captureDocumentRaster(fname);
+  }
+
+  // A frame from the video itself, so the card shows the piece rather than a
+  // generic badge. Seeks a little way in, because frame one is often black.
+  function captureVideoFrame(fname) {
+    const v = document.createElement('video');
+    v.muted = true;                       // a capture must never make a sound
+    v.preload = 'auto';
+    v.crossOrigin = 'anonymous';
+    v.style.cssText = 'position:fixed;left:-20000px;top:0;width:720px;height:405px';
+    v.src = '/files/' + encodeURIComponent(fname);
+
+    const done = new Promise((resolve, reject) => {
+      const giveUp = setTimeout(() => reject(new Error('timed out')), 25000);
+      const fail = (e) => { clearTimeout(giveUp); reject(e || new Error('video error')); };
+      v.onerror = fail;
+      v.onloadedmetadata = () => {
+        // 1s in, or a tenth of the way through a very short clip.
+        v.currentTime = Math.min(1, (v.duration || 1) * 0.1);
+      };
+      v.onseeked = async () => {
+        try {
+          const w = v.videoWidth || 720, h = v.videoHeight || 405;
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(v, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/png');
+          const res = await fetch('/thumb', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file: fname, data: dataUrl })
+          });
+          if (!res.ok) throw new Error('save HTTP ' + res.status);
+          const { thumbnail_mtime } = await res.json();
+          thumbnailMtimeByName.set(fname, thumbnail_mtime);
+          showThumbnailOnCard(fname);
+          clearTimeout(giveUp);
+          resolve();
+        } catch (e) { fail(e); }
+      };
+    });
+    document.body.appendChild(v);
+    return done.finally(() => { v.removeAttribute('src'); v.load(); v.remove(); });
+  }
+
+  function captureDocumentRaster(fname) {
     const { width, height } = THUMBNAIL_VIEWPORT;
     const frame = document.createElement('iframe');
     frame.setAttribute('aria-hidden', 'true');
@@ -1705,12 +2160,46 @@
     const checks = document.querySelectorAll('.card .select-check:checked');
     const names = Array.from(checks).map(c => c.dataset.name);
     if (names.length === 0) return;
-    if (!confirm('PERMANENTLY DELETE ' + names.length + ' file' + (names.length > 1 ? 's' : '') + '?\n\nThis cannot be undone.\n\n' + names.join('\n'))) return;
+    // A linked artifact only has a pointer here, so saying "permanently
+    // delete" about the asset would be false.
+    // An unsaved paste is not in the artifacts folder at all, so /delete
+    // cannot see it; it gets discarded instead.
+    const unsavedPicked = names.filter(n => {
+      const f = files.find(x => x.name === n);
+      return f && f.unsaved;
+    });
+    const linkedNames = names.filter(n => {
+      const f = files.find(x => x.name === n);
+      return f && f.linked && !f.unsaved;
+    });
+    const plain = names.filter(n => !linkedNames.includes(n) && !unsavedPicked.includes(n));
+    let msg = '';
+    if (unsavedPicked.length) {
+      msg += 'DISCARD ' + unsavedPicked.length + ' unsaved paste' +
+             (unsavedPicked.length > 1 ? 's' : '') +
+             '?\n\nThey were never registered, so nothing else changes.\n\n' +
+             unsavedPicked.join('\n') + '\n\n';
+    }
+    if (plain.length) {
+      msg += 'PERMANENTLY DELETE ' + plain.length + ' file' + (plain.length > 1 ? 's' : '') +
+             '?\n\nThis cannot be undone.\n\n' + plain.join('\n') + '\n\n';
+    }
+    if (linkedNames.length) {
+      msg += 'REMOVE ' + linkedNames.length + ' link' + (linkedNames.length > 1 ? 's' : '') +
+             '?\n\nThe asset stays where it is; only the link is removed.\n\n' +
+             linkedNames.join('\n') + '\n\n';
+    }
+    if (!confirm(msg.trim())) return;
     try {
+      if (unsavedPicked.length) await discardUnsaved(unsavedPicked);
+      if (!plain.length && !linkedNames.length) {
+        toggleSelectMode();
+        return;
+      }
       const res = await fetch('/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files: names })
+        body: JSON.stringify({ files: plain.concat(linkedNames) })
       });
       if (res.ok) {
         const data = await res.json();
@@ -1730,6 +2219,14 @@
     document.getElementById('homepage').classList.add('hidden');
     document.getElementById('detail-view').classList.add('visible');
     document.getElementById('detail-filename').textContent = f.name;
+    document.getElementById('unsaved-badge').style.display = f.unsaved ? '' : 'none';
+    document.getElementById('keep-btn').style.display = f.unsaved ? '' : 'none';
+    const linkBadge = document.getElementById('link-badge');
+    linkBadge.style.display = f.linked ? '' : 'none';
+    if (f.linked) {
+      linkBadge.textContent = f.link_error ? 'link broken' : 'linked';
+      linkBadge.title = f.link_error || ('Lives at ' + (f.link_target || ''));
+    }
     document.getElementById('detail-open').href = '/files/' + encodeURIComponent(f.name);
 
     // Show/hide edit button
@@ -1745,7 +2242,7 @@
     syncPreviewButton();
     renderSidebar();
     renderPreview(f);
-    if (THUMBNAIL_EXT.includes(ext)) queueThumbnailCapture(f.name, true);
+    if (FRAME_THUMBNAIL_EXT.includes(ext)) queueThumbnailCapture(f.name, true);
   }
 
   // Hiding the detail view leaves the artifact's document running: audio and
@@ -1777,7 +2274,26 @@
     btn.classList.toggle('active', previewOnly);
   }
 
-  function goHome() {
+  function goHomeWithoutAsking() {
+    cancelEdit();
+    clearDetailPreview();
+    document.getElementById('detail-view').classList.remove('visible');
+    document.getElementById('homepage').classList.remove('hidden');
+    document.getElementById('detail-sidebar').classList.remove('visible');
+    activeFile = null;
+    applyFilters();
+    renderGrid();
+  }
+
+  async function goHome() {
+    // Leaving the artifact is the moment the paste would be lost, so ask here
+    // rather than letting it vanish silently.
+    if (activeFile && activeFile.unsaved) {
+      const answer = await askAboutUnsaved([activeFile.name]);
+      if (answer === 'stay') return;
+      if (answer === 'save') await keepUnsaved(activeFile.name);
+      else await discardUnsaved([activeFile.name]);
+    }
     cancelEdit();
     clearDetailPreview();
     document.getElementById('detail-view').classList.remove('visible');
@@ -1815,6 +2331,29 @@
     area.innerHTML = '';
     area.appendChild(editorWrap);
 
+    // A link whose target cannot be reached: say which path and why, rather
+    // than showing an empty player the user has to diagnose.
+    if (f.linked && f.link_error) {
+      // Built as nodes: the reason contains a path from a file on disk, and
+      // textContent cannot be turned into markup by whatever it holds.
+      const box = document.createElement('div');
+      box.className = 'link-broken';
+      const head = document.createElement('strong');
+      head.textContent = 'This linked asset cannot be opened.';
+      const why = document.createElement('div');
+      why.className = 'link-path';
+      why.textContent = f.link_error;
+      const hint = document.createElement('p');
+      hint.style.marginTop = '14px';
+      hint.textContent = 'Edit ' + f.name + '.link in the artifacts folder to fix the path. '
+                       + 'Deleting this card removes the link only.';
+      box.appendChild(head);
+      box.appendChild(why);
+      box.appendChild(hint);
+      area.appendChild(box);
+      return;
+    }
+
     const ext = getExt(f.name);
     const url = '/files/' + encodeURIComponent(f.name);
 
@@ -1830,6 +2369,29 @@
       const img = document.createElement('img');
       img.src = url;
       area.appendChild(img);
+
+    // Video. The server answers Range, so this seeks rather than re-downloads.
+    } else if (VIDEO_EXT.includes(ext)) {
+      const v = document.createElement('video');
+      v.src = url;
+      v.controls = true;
+      v.preload = 'metadata';
+      area.appendChild(v);
+
+    // Audio: there is nothing to look at, so name the file and play it.
+    } else if (AUDIO_EXT.includes(ext)) {
+      const stage = document.createElement('div');
+      stage.className = 'audio-stage';
+      const title = document.createElement('div');
+      title.className = 'audio-name';
+      title.textContent = f.name;
+      const a = document.createElement('audio');
+      a.src = url;
+      a.controls = true;
+      a.preload = 'metadata';
+      stage.appendChild(title);
+      stage.appendChild(a);
+      area.appendChild(stage);
 
     // CSV: table
     } else if (ext === 'csv') {
@@ -2441,9 +3003,23 @@
     } catch(e) {}
   }
 
+  // Browsers no longer allow custom text here; this produces their own
+  // generic "leave site?" dialog. The wording above is what the user sees
+  // when navigating inside the gallery, where it can be controlled.
+  window.addEventListener('beforeunload', (e) => {
+    if (unsavedList().length) {
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    }
+  });
+
   // ── Init ──────────────────────────────────────────────────────────
 
-  loadFiles();
+  // Anything left unsaved from a previous visit was never registered, so it
+  // goes now rather than lingering as a surprise.
+  document.addEventListener('paste', handlePaste);
+  discardUnsaved().then(loadFiles);
   connect();
   showVersion();
   checkUpdate();
