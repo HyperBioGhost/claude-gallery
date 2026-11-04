@@ -139,6 +139,14 @@
     cursor: pointer;
   }
   .group-select:hover { border-color: var(--accent); color: var(--accent); }
+  .view-as {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
 
   /* A header breaks the row it lands on, so each group starts its own row. */
   .group-header {
@@ -1029,6 +1037,9 @@
     <span class="unsaved-badge" id="unsaved-badge" style="display:none">Unsaved</span>
     <button class="toolbar-btn primary" id="keep-btn" onclick="keepUnsaved()" style="display:none">Save to gallery</button>
     <span class="save-status" id="save-status"></span>
+    <label class="view-as" id="view-as-wrap" style="display:none">View as
+      <select class="group-select" id="view-as" onchange="setViewAs(this.value)"></select>
+    </label>
     <button class="toolbar-btn" id="preview-btn" onclick="togglePreviewOnly()" style="display:none">Preview</button>
     <button class="toolbar-btn" id="edit-btn" onclick="toggleEdit()" style="display:none">Edit</button>
     <button class="toolbar-btn primary" id="save-btn" onclick="saveEdit()" style="display:none">Save</button>
@@ -1167,12 +1178,216 @@
     return { path: t, name: base };
   }
 
+  // <detect-pasted-type>
+  // Benchmarked against the files under AI_Shit -- see tools/detect-bench.
+  // tools/detect-bench reads this block from here, so edit it here only.
+  // Pasted-text type detection for the gallery. Returns an extension:
+  // md json csv html svg mmd yaml py js.
+  //
+  // Pasted text is mostly English prose, so:
+  // - Evidence is ANCHORED to the start of a line. "return", "import" and "let"
+  //   are English words; "def name(" opening a line is not.
+  // - Each line is classified once -- code-shaped, markdown-shaped, or prose --
+  //   so markdown inside a string literal cannot vote for markdown.
+  // - When unsure the answer is md: markdown renders prose correctly, and the
+  //   View as control fixes anything else in one click.
+
+  const MERMAID_FIRST = /^(graph|flowchart)\s+(TB|TD|BT|RL|LR)\b|^(sequenceDiagram|classDiagram|stateDiagram(-v2)?|erDiagram|gantt|pie(\s+title)?|journey|mindmap|timeline|gitGraph|quadrantChart|xychart-beta)\b/;
+
+  // Language-specific evidence.
+  const PY_LINE = [
+    /^\s*(async\s+)?def\s+\w+\s*\(.*\)\s*(->\s*[^:]+)?:/,
+    /^\s*class\s+\w+(\s*\([^)]*\))?\s*:/,
+    /^\s*from\s+[\w.]+\s+import\s+[\w*,\s()]+$/,
+    /^\s*import\s+[\w.]+(\s+as\s+\w+)?(\s*,\s*[\w.]+(\s+as\s+\w+)?)*\s*$/,
+    /^\s*(elif|except)\b.*:\s*$/,
+    /^\s*(try|finally|else)\s*:\s*$/,
+    /^\s*(if|for|while|with)\s+[^:]+:\s*(#.*)?$/,
+    /^\s*@[\w.]+(\(.*\))?\s*$/,
+    /\bself\.\w+/,
+    /^\s*(raise|yield|pass)\b/,
+    /^\s*print\(/,
+    /^\s*"""|'''/,
+    /\b(None|True|False)\b\s*[,)\]:]/,
+    /\bf["'][^"']*\{/,
+  ];
+  const JS_LINE = [
+    /^\s*(export\s+)?(const|let|var)\s+[\w${}\[\],\s:]+=(?!=)/,
+    /^\s*(export\s+(default\s+)?)?(async\s+)?function\s*\*?\s*[\w$]*\s*\(/,
+    /^\s*import\s+.+\s+from\s+['"][^'"]+['"];?\s*$/,
+    /^\s*import\s+['"][^'"]+['"];?\s*$/,
+    /^\s*export\s+(default|\{|\*)/,
+    /\brequire\(\s*['"][^'"]+['"]\s*\)/,
+    /\bconsole\.\w+\(/,
+    /=>\s*[{(]?/,
+    /^\s*(if|for|while|switch)\s*\(.*\)\s*\{?\s*$/,
+    /^\s*\}\s*(else\b.*)?[;)]*\s*$/,
+    /;\s*(\/\/.*)?$/,
+    /\b(document|window)\.\w+/,
+    /\b(null|undefined|true|false)\b\s*[,;)}\]]/,
+  ];
+  // Code of either language: the shape of a statement, not of a sentence.
+  const CODE_LINE = [
+    /^\s*[\w$.\[\]'"]+\s*(=|\+=|-=|\*=|\|=)\s*\S/,       // assignment
+    /^\s*[\w$.]+\(.*\)[;,]?\s*$/,                         // a bare call
+    /^\s*[\]})]+[;,)]*\s*$/,                              // closers
+    /^\s*(return|throw|break|continue)\b/,
+    /[{(\[]\s*$/,                                          // opens a block
+    /^\s*\+?\s*[fbr]?['"].*['"]\s*[,)+]\s*$/,              // a string in a call or a concatenation
+  ];
+
+  const MD_LINE = /^#{1,6}\s+\S|\*\*\S[^*]*\*\*|\[[^\]]+\]\([^)]+\)|^\s*\d+\.\s+\S|^\s*\|.*\|\s*$|^>\s|^\s*[-*+]\s+\S/;
+  // Markdown that YAML cannot contain. A bullet is not on this list: "- CA" is
+  // a YAML list item too, and letting it veto would sink every YAML with a list.
+  const MD_NOT_YAML = /\*\*\S[^*]*\*\*|\[[^\]]+\]\([^)]+\)|^\s*\d+\.\s+\S|^\s*\|.*\|\s*$|^>\s/;
+
+  // YAML keys: no spaces in the key (that separates "name: v" from "Note: this"),
+  // any script -- the Playbook settings use Chinese keys.
+  const YAML_KEY = /^\s*(-\s+)?["']?[\p{L}\p{N}_.\-/]+["']?\s*:(\s+\S.*|\s*)$/u;
+  const YAML_LIST = /^\s*-\s+\S/;
+
+  // Quote-aware comma count, so "Sr. Mgr, Adapt, Ads Mktg" is one field.
+  function fieldsOf(line) {
+    let n = 1, q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { if (q && line[i + 1] === '"') i++; else q = !q; }
+      else if (c === ',' && !q) n++;
+    }
+    return n;
+  }
+
+  function isCsv(lines) {
+    const rows = lines.filter(l => l.trim());
+    if (rows.length < 3) return false;
+    if (rows.some(l => /^\s*\|/.test(l))) return false;          // a markdown table
+    // Exports may open with a title line, so judge by the dominant shape.
+    const tally = new Map();
+    for (const r of rows) { const f = fieldsOf(r); tally.set(f, (tally.get(f) || 0) + 1); }
+    const [fields, count] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (fields < 2 || count / rows.length < 0.85) return false;
+    // Prose puts a space after its commas; machine CSV rarely does.
+    const commas = rows.join('\n').match(/,/g) || [];
+    const spaced = rows.join('\n').match(/, /g) || [];
+    if (fields === 2 && spaced.length / commas.length > 0.5) return false;
+    return true;
+  }
+
+  function isPartialJson(text, content) {
+    if (!/^[\[{]/.test(text)) return false;
+    const jsonish = content.filter(l =>
+      /^\s*"[^"]*"\s*:/.test(l) || /^\s*[\[\]{}],?\s*$/.test(l) ||
+      /^\s*("[^"]*"|-?\d[\d.eE+-]*|true|false|null)\s*,?\s*$/.test(l)).length;
+    return content.length >= 3 && jsonish / content.length >= 0.8;
+  }
+
+  function isYaml(lines, content, mdNotYaml) {
+    if (content.length < 2 || mdNotYaml > 0) return false;
+    // Skip the body of block scalars (key: | / key: >).
+    const keep = [];
+    let blockIndent = -1;
+    for (const l of lines) {
+      if (!l.trim() || /^\s*#/.test(l)) continue;
+      const ind = l.match(/^\s*/)[0].length;
+      if (blockIndent >= 0 && ind > blockIndent) continue;
+      blockIndent = /:\s*[|>][-+]?\s*$/.test(l) ? ind : -1;
+      keep.push(l);
+    }
+    const yamlish = keep.filter(l => YAML_KEY.test(l) || YAML_LIST.test(l) || /^---\s*$/.test(l)).length;
+    const keyed = keep.filter(l => YAML_KEY.test(l)).length;
+    if (keyed < 2 || yamlish / keep.length < 0.8) return false;
+    // "Flight: AA12 / Hotel: Hilton" is a list of labels, not a document. Real
+    // YAML nests, lists, or uses identifier-style keys.
+    const nested = keep.some(l => /^\s+\S/.test(l));
+    const listed = keep.some(l => YAML_LIST.test(l));
+    const identKeys = keep.filter(l => /^\s*(-\s+)?["']?([a-z_][\w.\-]*|[^\x00-\x7F])/u.test(l)).length;
+    return nested || listed || identKeys / keyed >= 0.5;
+  }
+
+  function detectPastedType(raw) {
+    const text = raw.replace(/^﻿/, '').trim();
+    if (!text) return 'md';
+
+    // Exact formats: cheap, and certain when they match.
+    if (/^[\[{]/.test(text)) { try { JSON.parse(text); return 'json'; } catch {} }
+    if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(text)) return 'svg';
+    if (/^(<!--[\s\S]*?-->\s*)*(<!doctype\s+html|<html[\s>])/i.test(text)) return 'html';
+    if (/^<(head|body|div|section|main|style|script|table|header|nav|article|template|form|ul|ol)[\s>]/i.test(text)
+        && /<\/(head|body|div|section|main|style|script|table|header|nav|article|template|form|ul|ol)>/i.test(text)) {
+      return 'html';
+    }
+
+    const lines = text.split(/\r?\n/);
+    const firstLine = lines.find(l => l.trim()).trim();
+    if (MERMAID_FIRST.test(firstLine)) return 'mmd';
+
+    // A fenced block only appears inside markdown.
+    if (/^\s*```/m.test(text)) return 'md';
+
+    // Comment lines are neutral: '#' opens a Python/YAML comment and also a
+    // markdown heading, so it cannot vote either way. A Python docstring is
+    // neutral for the same reason -- it is prose inside code, and a long one at
+    // the top of a file used to outvote the code below it. Its opening line
+    // still counts, because a line that opens with """ is Python evidence.
+    const content = [];
+    let inDoc = null;
+    for (const l of lines) {
+      if (inDoc) {
+        if (l.includes(inDoc)) inDoc = null;
+        continue;
+      }
+      const open = l.match(/^\s*[rbuRBU]?("""|''')/);
+      if (open) {
+        content.push(l);
+        const rest = l.slice(l.indexOf(open[1]) + 3);
+        if (!rest.includes(open[1])) inDoc = open[1];
+        continue;
+      }
+      if (l.trim() && !/^\s*(#|\/\/|\/\*|\*\s|\*\/)/.test(l)) content.push(l);
+    }
+    if (isPartialJson(text, content)) return 'json';
+    if (isCsv(lines)) return 'csv';
+
+    const n = content.length || 1;
+    let py = 0, js = 0, code = 0, mdProse = 0, mdNotYaml = 0;
+    for (const l of content) {
+      const p = PY_LINE.some(re => re.test(l)), j = JS_LINE.some(re => re.test(l));
+      const c = p || j || CODE_LINE.some(re => re.test(l));
+      if (p) py++;
+      if (j) js++;
+      if (c) code++;
+      else if (MD_LINE.test(l)) mdProse++;      // only lines that are not code
+      if (!c && MD_NOT_YAML.test(l)) mdNotYaml++;
+    }
+
+    if (content.length <= 3 && text.length > 2000) {
+      const dense = (text.match(/[;{}]/g) || []).length / text.length;
+      if (dense > 0.02 && /\bfunction\b|=>/.test(text)) return 'js';   // minified
+    }
+    if (code >= 2 && code / n >= 0.4) {
+      if (py > js) return 'py';
+      if (js > py) return 'js';
+    }
+
+    if (isYaml(lines, content, mdNotYaml)) return 'yaml';
+    return 'md';
+  }
+  // </detect-pasted-type>
+
   function pastedTextName(text) {
-    // A heading makes a better filename than a timestamp.
-    const head = (text.trim().split(/\r?\n/)[0] || '').replace(/^#+\s*/, '');
-    const slug = head.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-                     .replace(/^-|-$/g, '').slice(0, 48);
-    return (slug || 'pasted-' + Date.now()) + '.md';
+    const ext = detectPastedType(text);
+    // A markdown heading makes a better filename than a timestamp. For other
+    // types the first line is syntax ("{", "import os"), not a title.
+    if (ext === 'md') {
+      const head = (text.trim().split(/\r?\n/)[0] || '').replace(/^#+\s*/, '');
+      const slug = head.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+                       .replace(/^-|-$/g, '').slice(0, 48);
+      if (slug) return slug + '.md';
+    }
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return 'pasted-' + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' +
+           pad(d.getHours()) + pad(d.getMinutes()) + '.' + ext;
   }
 
   async function postPaste(payload) {
@@ -1415,6 +1630,26 @@
   // side to show on its own.
   const SPLIT_PREVIEW_EXT = ['md', 'json', 'mermaid', 'mmd'];
   let undoTimer = null;          // how long the post-save Undo stays offered
+  // View as. For a registered artifact this is display only and lasts until
+  // the file is left: nothing is stored and the file is never touched. For an
+  // unsaved paste the file is renamed instead, so it is saved as that type.
+  let viewAsExt = null;
+  let viewAsBlobUrl = null;
+  const VIEW_AS = [
+    ['md', 'Markdown'], ['json', 'JSON'], ['csv', 'CSV'], ['mmd', 'Mermaid'],
+    ['html', 'HTML'], ['svg', 'SVG'], ['yaml', 'YAML'], ['py', 'Python'],
+    ['js', 'JavaScript'], ['ts', 'TypeScript'], ['css', 'CSS'], ['xml', 'XML'],
+    ['txt', 'Plain text'],
+  ];
+  // Real extensions that View as can start from: the text types.
+  const VIEW_AS_FROM = ['md', 'json', 'csv', 'mmd', 'mermaid', 'html', 'htm', 'svg',
+                        'yaml', 'yml', 'py', 'js', 'ts', 'css', 'xml', 'txt', 'srt'];
+  const CANONICAL = { mermaid: 'mmd', htm: 'html', yml: 'yaml', srt: 'txt' };
+
+  function effectiveExt(f) {
+    if (f && activeFile && f.name === activeFile.name && viewAsExt) return viewAsExt;
+    return getExt(f.name);
+  }
   let livePreviewTimer = null;   // debounce for iframe-rendered previews
   let livePreviewUrl = null;     // blob URL currently loaded in the preview iframe
   // Types whose preview is a real document render (iframe) rather than a DOM
@@ -2214,6 +2449,7 @@
   // ── Detail View ───────────────────────────────────────────────────
 
   function openDetail(f) {
+    if (!activeFile || activeFile.name !== f.name) viewAsExt = null;
     activeFile = f;
     cancelEdit();
     document.getElementById('homepage').classList.add('hidden');
@@ -2240,6 +2476,7 @@
     document.getElementById('export-menu').classList.remove('visible');
 
     syncPreviewButton();
+    syncViewAs();
     renderSidebar();
     renderPreview(f);
     if (FRAME_THUMBNAIL_EXT.includes(ext)) queueThumbnailCapture(f.name, true);
@@ -2254,6 +2491,7 @@
     const editorWrap = document.getElementById('editor-wrap');
     area.innerHTML = '';
     area.appendChild(editorWrap);
+    if (viewAsBlobUrl) { URL.revokeObjectURL(viewAsBlobUrl); viewAsBlobUrl = null; }
   }
 
   // Toggling is a class swap on the live pane: re-rendering would re-parse the
@@ -2265,9 +2503,52 @@
     syncPreviewButton();
   }
 
+  function syncViewAs() {
+    const wrap = document.getElementById('view-as-wrap');
+    const real = activeFile ? getExt(activeFile.name) : '';
+    const linked = activeFile && activeFile.linked;
+    const show = activeFile && VIEW_AS_FROM.includes(real) && !linked && !editMode;
+    wrap.style.display = show ? '' : 'none';
+    if (!show) return;
+    const sel = document.getElementById('view-as');
+    const current = viewAsExt || CANONICAL[real] || real;
+    sel.innerHTML = '';
+    for (const [ext, label] of VIEW_AS) {
+      const o = document.createElement('option');
+      o.value = ext;
+      o.textContent = label;
+      if (ext === current) o.selected = true;
+      sel.appendChild(o);
+    }
+  }
+
+  async function setViewAs(ext) {
+    if (!activeFile) return;
+    if (activeFile.unsaved) {
+      // Rename the staged file, so Save to gallery keeps the chosen type.
+      const res = await fetch('/unsaved/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: activeFile.name, ext })
+      });
+      if (!res.ok) { alert('Could not switch: ' + (await res.text())); syncViewAs(); return; }
+      const { name } = await res.json();
+      await loadFiles();
+      const entry = files_byName(name);
+      if (entry) openDetail(entry);
+      return;
+    }
+    // Registered: display only.
+    const real = getExt(activeFile.name);
+    viewAsExt = (ext === (CANONICAL[real] || real)) ? null : ext;
+    renderPreview(activeFile);
+    syncPreviewButton();
+    syncViewAs();
+  }
+
   function syncPreviewButton() {
     const btn = document.getElementById('preview-btn');
-    const splittable = activeFile && SPLIT_PREVIEW_EXT.includes(getExt(activeFile.name));
+    const splittable = activeFile && SPLIT_PREVIEW_EXT.includes(effectiveExt(activeFile));
     btn.style.display = splittable && !editMode ? '' : 'none';
     // The label names where the click goes, not where you are.
     btn.textContent = previewOnly ? 'Split' : 'Preview';
@@ -2286,6 +2567,7 @@
   }
 
   async function goHome() {
+    viewAsExt = null;
     // Leaving the artifact is the moment the paste would be lost, so ask here
     // rather than letting it vanish silently.
     if (activeFile && activeFile.unsaved) {
@@ -2354,15 +2636,26 @@
       return;
     }
 
-    const ext = getExt(f.name);
+    const ext = effectiveExt(f);
     const url = '/files/' + encodeURIComponent(f.name);
 
     // iframe: html, svg
     if (['html','htm','svg'].includes(ext)) {
       const iframe = document.createElement('iframe');
-      iframe.src = url;
       if (ext !== 'svg') iframe.sandbox = PREVIEW_SANDBOX;
       area.appendChild(iframe);
+      if (['html','htm','svg'].includes(getExt(f.name))) {
+        iframe.src = url;
+      } else {
+        // Viewed as another type: the server sends this file as text, so the
+        // frame would only show its source. Render from the text instead.
+        fetch(url).then(r => r.text()).then(text => {
+          if (viewAsBlobUrl) URL.revokeObjectURL(viewAsBlobUrl);
+          const mime = ext === 'svg' ? 'image/svg+xml' : 'text/html';
+          viewAsBlobUrl = URL.createObjectURL(new Blob([text], { type: mime + ';charset=utf-8' }));
+          iframe.src = viewAsBlobUrl;
+        });
+      }
 
     // Images
     } else if (['png','jpg','jpeg','gif','webp'].includes(ext)) {
@@ -2508,7 +2801,8 @@
 
   function startEdit() {
     if (!activeFile) return;
-    const ext = getExt(activeFile.name);
+    // Editing a file viewed as SVG live-renders SVG: the override carries over.
+    const ext = effectiveExt(activeFile);
     const url = '/files/' + encodeURIComponent(activeFile.name);
 
     fetch(url).then(r => r.text()).then(text => {
@@ -2566,6 +2860,7 @@
       editBtn.textContent = 'Cancel';
       document.getElementById('save-btn').style.display = '';
       syncPreviewButton();
+      syncViewAs();
       ta.focus();
     });
   }
@@ -2582,6 +2877,7 @@
     editBtn.textContent = 'Edit';
     editMode = false;
     syncPreviewButton();
+    syncViewAs();
     livePreviewExt = null;
     // Drop the pending re-render and release the blob, or the URL leaks for the
     // lifetime of the tab every time an HTML file is edited.

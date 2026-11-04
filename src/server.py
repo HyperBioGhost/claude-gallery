@@ -847,6 +847,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 log.error('replace failed\n%s', traceback.format_exc())
                 self.send_error(500, str(e))
 
+        elif path == '/unsaved/rename':
+            # View as on an unsaved paste changes the extension it will be
+            # saved with. Safe because nothing refers to an unsaved paste yet;
+            # registered artifacts are never renamed by this.
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length))
+                name = body.get('file', '')
+                ext = str(body.get('ext', '')).lower().lstrip('.')
+                if name not in unsaved_names():
+                    self.send_error(404, 'not an unsaved paste'); return
+                if ext not in VIEW_AS_EXT:
+                    self.send_error(400, f'.{ext} is not a text type'); return
+                src = UNSAVED_DIR / name
+                if not src.is_file():
+                    # A pasted path is a link to a media file, not text.
+                    self.send_error(409, 'a linked paste cannot change type'); return
+                stem = name.rsplit('.', 1)[0] if '.' in name else name
+                wanted = f'{stem}.{ext}'
+                if wanted == name:
+                    self._json({'name': name}); return
+                final = free_artifact_name(wanted, UNSAVED_DIR, ROOT)
+                os.replace(src, UNSAVED_DIR / final)
+                thumbnail_path(name).unlink(missing_ok=True)
+                log.info('unsaved paste %s is now %s', name, final)
+                self._json({'name': final, 'was': name})
+            except Exception as e:
+                log.error('rename failed\n%s', traceback.format_exc())
+                self.send_error(500, str(e))
+
         elif path == '/unsaved/discard':
             try:
                 length = int(self.headers.get('Content-Length', 0))
@@ -1155,6 +1185,11 @@ MEDIA_EXT = {'mp4', 'm4v', 'webm', 'mov', 'mkv',
 # means the worst an abuser gets is a media file, never a credential or a
 # config. Pointers for anything else are still written to disk only.
 PASTE_LINK_EXT = MEDIA_EXT | {'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'}
+
+# The types an unsaved paste may be switched between. Text only: renaming
+# bytes to .mp4 would not make them a video.
+VIEW_AS_EXT = {'md', 'json', 'csv', 'mmd', 'html', 'svg', 'yaml', 'py', 'js',
+               'ts', 'css', 'xml', 'txt'}
 
 
 if __name__ == '__main__':

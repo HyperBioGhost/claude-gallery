@@ -1366,6 +1366,126 @@ def test_discard_from_the_collision_dialog_drops_the_paste(gallery, page):
     assert page.locator('#homepage').evaluate("el => !el.classList.contains('hidden')")
 
 
+# ── what type a paste is, and View as ─────────────────────────────────
+
+# Fixed cases for CI, which has no folder of real files to benchmark against.
+# The prose rows are the ones that matter most: they are what a paste usually
+# is, and a keyword-based detector reads "return", "import" and "Note:" in
+# ordinary sentences as code. tools/detect-bench scores the same function
+# against real files locally.
+DETECT_CASES = [
+    ('{\n  "name": "x",\n  "items": [1, 2]\n}', 'json'),
+    ('[1, 2, 3]', 'json'),
+    ('{\n  "name": "truncated",\n  "items": [\n    1,', 'json'),
+    ('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>', 'svg'),
+    ('<!doctype html><html><body>x</body></html>', 'html'),
+    ('graph TD\n  A --> B', 'mmd'),
+    ('city,name,count\nLondon,"Mgr, Ads",3\nParis,Ann,4', 'csv'),
+    ('import os\n\ndef main():\n    print(os.getcwd())\n', 'py'),
+    ('"""Docstring about the module.\n\nIt is long and reads like English prose.\n"""\nimport sys\nx = 1\n', 'py'),
+    ("import fs from 'node:fs';\nconst x = 1;\nexport default x;\n", 'js'),
+    ('rules:\n  - capability: shell\n    effect: allow\n', 'yaml'),
+    ('meta:\n  category_cn: 消费电子\n  markets:\n  - CA\n  - UK\n', 'yaml'),
+    ('# Title\n\nSome **bold** text and a [link](https://x.y).\n', 'md'),
+    ('```python\nprint(1)\n```\n', 'md'),
+    # Prose that a keyword detector gets wrong.
+    ('Let me know if you want to return it.', 'md'),
+    ('Note: this goes out on Friday, so please review it.', 'md'),
+    ('Here is the plan:\nWe import the deck, then export it as PDF.', 'md'),
+    ('We will await their answer and let the team decide.', 'md'),
+    ('Flight: AA12\nHotel: Hilton', 'md'),
+    ('Thanks, Enzo', 'md'),
+]
+
+
+@pytest.mark.parametrize('text,expected', DETECT_CASES)
+def test_pasted_type_detection(page, text, expected):
+    got = page.evaluate('(t) => detectPastedType(t)', text)
+    assert got == expected, f'{text[:40]!r} -> {got}, expected {expected}'
+
+
+def test_a_pasted_json_opens_as_json(gallery, page):
+    paste_text(page, '{\n  "name": "release",\n  "items": [1, 2, 3]\n}')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    assert page.locator('#detail-filename').inner_text().endswith('.json')
+    assert page.locator('#view-as').input_value() == 'json'
+    # The JSON renderer, not markdown: it shows raw and formatted panes.
+    labels = page.evaluate(
+        "() => [...document.querySelectorAll('#detail-preview .split-label')].map(l => l.textContent)")
+    assert 'Formatted' in labels, labels
+
+
+def test_view_as_on_a_paste_changes_the_type_it_is_saved_as(gallery, page):
+    paste_text(page, '{\n  "a": 1\n}')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    page.select_option('#view-as', 'yaml')
+    page.wait_for_function(
+        "() => document.getElementById('detail-filename').textContent.endsWith('.yaml')",
+        timeout=10000)
+    page.click('#keep-btn')
+    page.wait_for_function(
+        "() => document.getElementById('unsaved-badge').offsetParent === null", timeout=10000)
+    import json
+    [saved] = json.loads((gallery.root / 'artifacts.json').read_text(encoding='utf-8'))
+    assert saved.endswith('.yaml'), saved
+
+
+def test_view_as_on_a_registered_file_is_display_only(gallery, page):
+    body = (b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80">'
+            b'<text id="t" x="10" y="50">as svg</text></svg>\n')
+    (gallery.root / 'notes.md').write_bytes(body)
+    gallery.get('/notify?file=notes.md')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("notes.md")')
+    page.wait_for_selector('#view-as-wrap:visible')
+    page.select_option('#view-as', 'svg')
+    # Rendered from the text: the server sends .md as plain text, so loading
+    # the file into the frame would only show its source.
+    page.wait_for_function("""() => {
+        const f = document.querySelector('#detail-preview > iframe');
+        const t = f && f.contentDocument && f.contentDocument.getElementById('t');
+        return t && t.textContent === 'as svg';
+    }""", timeout=10000)
+    assert (gallery.root / 'notes.md').read_bytes() == body
+    assert not (gallery.root / 'notes.svg').exists()
+
+
+def test_a_view_as_override_does_not_outlive_the_visit(gallery, page):
+    gallery.write('notes.md', '{"a": 1}\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("notes.md")')
+    page.wait_for_selector('#view-as-wrap:visible')
+    page.select_option('#view-as', 'json')
+    page.wait_for_timeout(300)
+    page.click('.back-btn')
+    page.wait_for_timeout(300)
+    page.click('.card:has-text("notes.md")')
+    page.wait_for_selector('#view-as-wrap:visible')
+    assert page.locator('#view-as').input_value() == 'md'
+
+
+def test_view_as_is_not_offered_for_media(gallery, page):
+    (gallery.root / 'tone.wav').write_bytes(_wav_bytes())
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("tone.wav")')
+    page.wait_for_selector('.audio-stage audio')
+    assert page.locator('#view-as-wrap').is_hidden()
+
+
+def test_view_as_hides_while_editing(gallery, page):
+    gallery.write('notes.md', '# x\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    open_editor(page, 'notes.md')
+    assert page.locator('#view-as-wrap').is_hidden()
+    page.keyboard.press('Escape')
+    page.wait_for_timeout(300)
+    expect(page.locator('#view-as-wrap')).to_be_visible()
+
+
 # ── preview toggle ────────────────────────────────────────────────────
 
 MD_DOC = """Prose line one, long enough to wrap in a capped reading measure so the

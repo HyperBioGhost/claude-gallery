@@ -941,3 +941,52 @@ def test_replace_needs_a_real_staged_paste(gallery):
     status, _ = gallery.post('/unsaved/replace', {'file': 'never-pasted.md', 'target': 'note.md'})
     assert status == 404
     assert (gallery.root / 'note.md').read_bytes() == b'x\n'
+
+
+# ── View as on an unsaved paste: renaming ─────────────────────────────
+
+def test_an_unsaved_paste_can_change_type(gallery):
+    name = _paste_text(gallery, 'pasted.md', '{"a": 1}')['name']
+    status, body = gallery.post('/unsaved/rename', {'file': name, 'ext': 'json'})
+    assert status == 200 and body['name'] == 'pasted.json', body
+    assert (gallery.root / '.unsaved' / 'pasted.json').is_file()
+    assert not (gallery.root / '.unsaved' / 'pasted.md').exists()
+    # Still unsaved: nothing registered by switching.
+    assert gallery.mod.load_index() == []
+
+
+def test_renaming_to_the_same_type_changes_nothing(gallery):
+    name = _paste_text(gallery, 'pasted.md', 'x')['name']
+    assert gallery.post('/unsaved/rename', {'file': name, 'ext': 'md'})[1]['name'] == 'pasted.md'
+
+
+def test_a_renamed_paste_avoids_a_registered_name(gallery):
+    (gallery.root / 'pasted.json').write_bytes(b'{}')
+    gallery.get('/notify?file=pasted.json')
+    name = _paste_text(gallery, 'pasted.md', '{"a": 1}')['name']
+    got = gallery.post('/unsaved/rename', {'file': name, 'ext': 'json'})[1]['name']
+    assert got == 'pasted-1.json', got
+    assert (gallery.root / 'pasted.json').read_bytes() == b'{}'
+
+
+@pytest.mark.parametrize('ext', ['mp4', 'png', 'exe', 'link', '', '../x'])
+def test_only_text_types_can_be_switched_to(gallery, ext):
+    name = _paste_text(gallery, 'pasted.md', 'x')['name']
+    assert gallery.post('/unsaved/rename', {'file': name, 'ext': ext})[0] == 400
+    assert (gallery.root / '.unsaved' / 'pasted.md').is_file()
+
+
+def test_a_registered_artifact_is_never_renamed(gallery):
+    """View as on a registered file is display only; this endpoint refuses it."""
+    gallery.write('notes.md', '# x\n')
+    status, _ = gallery.post('/unsaved/rename', {'file': 'notes.md', 'ext': 'json'})
+    assert status == 404
+    assert (gallery.root / 'notes.md').exists()
+
+
+def test_a_linked_paste_cannot_change_type(gallery, tmp_path):
+    asset = tmp_path / 'elsewhere' / 'clip.mp4'
+    asset.parent.mkdir(exist_ok=True)
+    asset.write_bytes(b'v')
+    name = gallery.post('/paste', {'name': 'clip.mp4', 'path': str(asset)})[1]['name']
+    assert gallery.post('/unsaved/rename', {'file': name, 'ext': 'md'})[0] == 409
