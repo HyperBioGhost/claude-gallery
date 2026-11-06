@@ -1020,9 +1020,12 @@
   <div class="detail-toolbar">
     <div class="toolbar-left">
       <button class="back-btn" onclick="goHome()"><span class="back-arrow" aria-hidden="true">&#8592;</span>Back</button>
-      <label class="view-as" id="view-as-wrap" style="display:none">View as
-        <select class="group-select" id="view-as" onchange="setViewAs(this.value)"></select>
-      </label>
+      <!-- No visible caption: the type names in the menu say what it does.
+           The accessible name keeps it labelled for screen readers. -->
+      <span class="view-as" id="view-as-wrap" style="display:none">
+        <select class="group-select" id="view-as" aria-label="View as" title="View as"
+                onchange="setViewAs(this.value)"></select>
+      </span>
       <span class="detail-filename" id="detail-filename"></span>
       <span class="link-badge" id="link-badge" style="display:none"></span>
       <span class="unsaved-badge" id="unsaved-badge" style="display:none">Unsaved</span>

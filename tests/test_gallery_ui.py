@@ -1565,6 +1565,19 @@ def test_view_as_sits_left_of_the_file_name(gallery, page):
     assert order[:3] == ['back-btn', 'view-as-wrap', 'detail-filename'], order
 
 
+def test_view_as_has_no_caption_but_keeps_its_name(gallery, page):
+    """The menu's own type names say what it does; screen readers still get one."""
+    gallery.write('doc.md', '# x\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("doc.md")')
+    page.wait_for_selector('#view-as-wrap:visible')
+    caption = page.evaluate("""() => [...document.getElementById('view-as-wrap').childNodes]
+        .filter(n => n.nodeType === 3).map(n => n.textContent.trim()).join('')""")
+    assert caption == '', f'visible caption still there: {caption!r}'
+    assert page.get_attribute('#view-as', 'aria-label') == 'View as'
+
+
 def test_the_back_arrow_wears_the_logo_colour(gallery, page):
     gallery.write('doc.md', '# x\n')
     page.reload(wait_until='networkidle')
