@@ -592,14 +592,40 @@
   #homepage.hidden { display: none; }
 
   .detail-toolbar {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    gap: 10px;
+    gap: 16px;
     padding: 10px 20px;
     border-bottom: 1px solid var(--rule);
     background: white;
     flex-shrink: 0;
     z-index: 20;
+  }
+  .toolbar-left, .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .toolbar-right { justify-content: flex-end; }
+  /* Only the file name gives way when space runs out; everything else keeps
+     its size and stays on one line. */
+  .toolbar-left > *, .toolbar-right > * { flex-shrink: 0; white-space: nowrap; }
+  .toolbar-left > .detail-filename { flex-shrink: 1; }
+  .toolbar-center { display: flex; justify-content: center; }
+  /* The arrow takes the logo's colour, so Back reads as "to the Gallery". */
+  .back-arrow {
+    color: var(--accent);
+    font-weight: 700;
+    margin-right: 6px;
+    display: inline-block;
+    transition: transform 0.15s;
+  }
+  .back-btn:hover .back-arrow { transform: translateX(-2px); }
+  @media (prefers-reduced-motion: reduce) {
+    .back-arrow { transition: none; }
+    .back-btn:hover .back-arrow { transform: none; }
   }
   .back-btn {
     background: none;
@@ -614,7 +640,11 @@
   }
   .back-btn:hover { border-color: var(--accent); color: var(--accent); }
   .detail-filename {
-    flex: 1;
+    /* A fixed cap, so a long name cannot crowd the centred Preview; the full
+       name is in the tooltip. */
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 32ch;
     font-size: 13px;
     font-weight: 500;
     color: var(--ink);
@@ -666,6 +696,7 @@
     position: relative;
     display: inline-block;
   }
+  .export-menu .export-divider { height: 1px; background: var(--rule); margin: 4px 0; }
   .export-menu {
     position: absolute;
     top: 100%;
@@ -696,31 +727,6 @@
     display: flex;
     overflow: hidden;
   }
-
-  /* Sidebar (hidden by default in detail) */
-  .detail-sidebar {
-    width: 240px;
-    min-width: 240px;
-    background: var(--paper-warm);
-    border-right: 1px solid var(--rule);
-    overflow-y: auto;
-    display: none;
-    flex-shrink: 0;
-  }
-  .detail-sidebar.visible { display: block; }
-  .sidebar-file {
-    padding: 10px 16px;
-    font-size: 12px;
-    color: var(--ink-soft);
-    cursor: pointer;
-    border-bottom: 1px solid oklch(92% 0.005 260);
-    transition: background 0.1s;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .sidebar-file:hover { background: white; }
-  .sidebar-file.active { background: white; color: var(--accent); font-weight: 500; }
 
   .detail-preview {
     flex: 1;
@@ -932,27 +938,6 @@
   .csv-preview tr:hover td { background: var(--paper-warm); }
   .csv-preview .row-count { font-size: 11px; color: var(--ink-faint); margin-bottom: 12px; }
 
-  /* Hamburger */
-  .hamburger {
-    background: none;
-    border: 1px solid var(--rule);
-    border-radius: 5px;
-    padding: 6px 10px;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    transition: border-color 0.15s;
-  }
-  .hamburger:hover { border-color: var(--accent); }
-  .hamburger span {
-    display: block;
-    width: 16px;
-    height: 2px;
-    background: var(--ink-soft);
-    border-radius: 1px;
-  }
-
   /* ── Server down ────────────────────────────────────────────── */
   .server-down {
     display: flex;
@@ -1029,29 +1014,35 @@
 
 <!-- ═══ DETAIL VIEW ═══ -->
 <div id="detail-view">
+  <!-- Three zones on a grid, so Preview sits at the true centre whatever the
+       two sides hold. The side tracks are minmax(0, 1fr): the file name gives
+       way before anything can cross into the middle. -->
   <div class="detail-toolbar">
-    <button class="back-btn" onclick="goHome()">&#8592; Back</button>
-    <button class="hamburger" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
-    <span class="detail-filename" id="detail-filename"></span>
-    <span class="link-badge" id="link-badge" style="display:none"></span>
-    <span class="unsaved-badge" id="unsaved-badge" style="display:none">Unsaved</span>
-    <button class="toolbar-btn primary" id="keep-btn" onclick="keepUnsaved()" style="display:none">Save to gallery</button>
-    <span class="save-status" id="save-status"></span>
-    <label class="view-as" id="view-as-wrap" style="display:none">View as
-      <select class="group-select" id="view-as" onchange="setViewAs(this.value)"></select>
-    </label>
-    <button class="toolbar-btn" id="preview-btn" onclick="togglePreviewOnly()" style="display:none">Preview</button>
-    <button class="toolbar-btn" id="edit-btn" onclick="toggleEdit()" style="display:none">Edit</button>
-    <button class="toolbar-btn primary" id="save-btn" onclick="saveEdit()" style="display:none">Save</button>
-    <button class="toolbar-btn" id="saveas-btn" onclick="saveAs()">Save As</button>
-    <div class="export-wrap" id="export-wrap" style="display:none">
-      <button class="toolbar-btn" id="export-btn" onclick="toggleExportMenu()">Export &#9662;</button>
-      <div class="export-menu" id="export-menu"></div>
+    <div class="toolbar-left">
+      <button class="back-btn" onclick="goHome()"><span class="back-arrow" aria-hidden="true">&#8592;</span>Back</button>
+      <label class="view-as" id="view-as-wrap" style="display:none">View as
+        <select class="group-select" id="view-as" onchange="setViewAs(this.value)"></select>
+      </label>
+      <span class="detail-filename" id="detail-filename"></span>
+      <span class="link-badge" id="link-badge" style="display:none"></span>
+      <span class="unsaved-badge" id="unsaved-badge" style="display:none">Unsaved</span>
     </div>
-    <a class="toolbar-btn" id="detail-open" href="#" target="_blank">Open in tab &#8599;</a>
+    <div class="toolbar-center">
+      <button class="toolbar-btn" id="preview-btn" onclick="togglePreviewOnly()" style="display:none">Preview</button>
+    </div>
+    <div class="toolbar-right">
+      <span class="save-status" id="save-status"></span>
+      <button class="toolbar-btn primary" id="keep-btn" onclick="keepUnsaved()" style="display:none">Save to gallery</button>
+      <button class="toolbar-btn" id="edit-btn" onclick="toggleEdit()" style="display:none">Edit</button>
+      <button class="toolbar-btn primary" id="save-btn" onclick="saveEdit()" style="display:none">Save</button>
+      <div class="export-wrap" id="export-wrap">
+        <button class="toolbar-btn" id="export-btn" onclick="toggleExportMenu()">Export &#9662;</button>
+        <div class="export-menu" id="export-menu"></div>
+      </div>
+      <a class="toolbar-btn" id="detail-open" href="#" target="_blank">Open in tab &#8599;</a>
+    </div>
   </div>
   <div class="detail-body">
-    <div class="detail-sidebar" id="detail-sidebar"></div>
     <div class="detail-preview" id="detail-preview">
       <!-- Editor overlay -->
       <div class="editor-wrap" id="editor-wrap">
@@ -2455,6 +2446,7 @@
     document.getElementById('homepage').classList.add('hidden');
     document.getElementById('detail-view').classList.add('visible');
     document.getElementById('detail-filename').textContent = f.name;
+    document.getElementById('detail-filename').title = f.name;
     document.getElementById('unsaved-badge').style.display = f.unsaved ? '' : 'none';
     document.getElementById('keep-btn').style.display = f.unsaved ? '' : 'none';
     const linkBadge = document.getElementById('link-badge');
@@ -2470,14 +2462,10 @@
     const editBtn = document.getElementById('edit-btn');
     editBtn.style.display = EDITABLE.includes(ext) ? '' : 'none';
 
-    // Show/hide export
-    const exportWrap = document.getElementById('export-wrap');
-    exportWrap.style.display = getExportOptions(ext).length > 0 ? '' : 'none';
     document.getElementById('export-menu').classList.remove('visible');
 
     syncPreviewButton();
     syncViewAs();
-    renderSidebar();
     renderPreview(f);
     if (FRAME_THUMBNAIL_EXT.includes(ext)) queueThumbnailCapture(f.name, true);
   }
@@ -2560,7 +2548,6 @@
     clearDetailPreview();
     document.getElementById('detail-view').classList.remove('visible');
     document.getElementById('homepage').classList.remove('hidden');
-    document.getElementById('detail-sidebar').classList.remove('visible');
     activeFile = null;
     applyFilters();
     renderGrid();
@@ -2580,28 +2567,10 @@
     clearDetailPreview();
     document.getElementById('detail-view').classList.remove('visible');
     document.getElementById('homepage').classList.remove('hidden');
-    document.getElementById('detail-sidebar').classList.remove('visible');
     activeFile = null;
     // Refresh grid in case of changes
     applyFilters();
     renderGrid();
-  }
-
-  function toggleSidebar() {
-    document.getElementById('detail-sidebar').classList.toggle('visible');
-  }
-
-  function renderSidebar() {
-    const sb = document.getElementById('detail-sidebar');
-    sb.innerHTML = '';
-    files.forEach(f => {
-      const div = document.createElement('div');
-      div.className = 'sidebar-file' + (activeFile && activeFile.name === f.name ? ' active' : '');
-      div.textContent = f.name;
-      div.title = f.name;
-      div.onclick = () => { openDetail(f); };
-      sb.appendChild(div);
-    });
   }
 
   // ── Preview Renderer ──────────────────────────────────────────────
@@ -3119,12 +3088,21 @@
     const menu = document.getElementById('export-menu');
     if (menu.classList.contains('visible')) { menu.classList.remove('visible'); return; }
     if (!activeFile) return;
-    const options = getExportOptions(getExt(activeFile.name));
-    if (!options.length) return;
+    // The file exactly as it is comes first -- this was the Save As button --
+    // then the conversions its type supports.
+    const ext = getExt(activeFile.name);
+    const options = [{ label: 'As is' + (ext ? ' (.' + ext + ')' : ''), action: saveAs, id: 'export-as-is' }]
+      .concat(getExportOptions(ext));
     menu.innerHTML = '';
-    options.forEach(opt => {
+    options.forEach((opt, i) => {
+      if (i === 1) {
+        const rule = document.createElement('div');
+        rule.className = 'export-divider';
+        menu.appendChild(rule);
+      }
       const item = document.createElement('div');
       item.className = 'export-item';
+      if (opt.id) item.id = opt.id;
       item.textContent = opt.label;
       item.onclick = () => { menu.classList.remove('visible'); opt.action(); };
       menu.appendChild(item);
@@ -3230,10 +3208,6 @@
       applyFilters();
       if (!document.getElementById('homepage').classList.contains('hidden')) {
         renderGrid();
-      }
-      // Update sidebar if in detail view
-      if (activeFile) {
-        renderSidebar();
       }
     };
     es.onerror = () => {

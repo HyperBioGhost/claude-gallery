@@ -169,8 +169,7 @@ def test_save_as_offers_a_mime_the_picker_accepts(gallery, page, name):
     page.on('dialog', lambda d: (alerts.append(d.message), d.dismiss()))
 
     page.click(f'.card:has-text("{name}")')
-    page.wait_for_selector('#saveas-btn')
-    page.click('#saveas-btn')
+    export_as_is(page)
     page.wait_for_function("() => window.__pickerOpts !== null", timeout=5000)
 
     opts = page.evaluate('window.__pickerOpts')
@@ -190,6 +189,14 @@ def test_save_as_offers_a_mime_the_picker_accepts(gallery, page, name):
         timeout=5000)
 
 
+def export_as_is(page):
+    """Save As now lives in the Export menu, as its first item."""
+    page.wait_for_selector('#export-btn:visible')
+    page.click('#export-btn')
+    page.wait_for_selector('#export-as-is:visible')
+    page.click('#export-as-is')
+
+
 def test_save_as_surfaces_a_real_failure(gallery, page):
     """The error path must still report, or a failed save looks like success."""
     gallery.write('doc.md', '# x\n')
@@ -201,8 +208,7 @@ def test_save_as_surfaces_a_real_failure(gallery, page):
     alerts = []
     page.on('dialog', lambda d: (alerts.append(d.message), d.dismiss()))
     page.click('.card:has-text("doc.md")')
-    page.wait_for_selector('#saveas-btn')
-    page.click('#saveas-btn')
+    export_as_is(page)
     page.wait_for_timeout(600)
     assert any('boom' in a for a in alerts), alerts
     assert 'Saved to disk' not in page.locator('#save-status').inner_text()
@@ -219,8 +225,7 @@ def test_save_as_stays_quiet_when_the_user_cancels(gallery, page):
     alerts = []
     page.on('dialog', lambda d: (alerts.append(d.message), d.dismiss()))
     page.click('.card:has-text("doc.md")')
-    page.wait_for_selector('#saveas-btn')
-    page.click('#saveas-btn')
+    export_as_is(page)
     page.wait_for_timeout(600)
     assert alerts == [], alerts
     assert 'Saved to disk' not in page.locator('#save-status').inner_text()
@@ -237,7 +242,7 @@ def test_save_as_works_without_the_file_system_access_api(page):
     if not has_picker:
         # Actually exercise it on an engine that lacks the API.
         assert page.evaluate(
-            "() => document.getElementById('saveas-btn') !== null")
+            "() => document.getElementById('export-btn') !== null")
 
 
 def test_imported_file_appears_without_a_reload(gallery, page):
@@ -1484,6 +1489,111 @@ def test_view_as_hides_while_editing(gallery, page):
     page.keyboard.press('Escape')
     page.wait_for_timeout(300)
     expect(page.locator('#view-as-wrap')).to_be_visible()
+
+
+# ── the detail toolbar ────────────────────────────────────────────────
+
+LONG_NAME = 'category-playbook-consumer-electronics-seven-marketplaces-final-review-notes-v12.md'
+
+TOOLBAR_GEOMETRY = """() => {
+    const vis = el => el && el.offsetParent !== null && el.getBoundingClientRect().width > 0;
+    const tb = document.querySelector('.detail-toolbar').getBoundingClientRect();
+    const c = document.getElementById('preview-btn').getBoundingClientRect();
+    const others = [...document.querySelectorAll('.toolbar-left > *, .toolbar-right > *')]
+        .filter(vis).map(el => el.getBoundingClientRect());
+    return {
+        offset: Math.abs((c.left + c.right) / 2 - (tb.left + tb.right) / 2),
+        overlaps: others.filter(r => r.left < c.right - 0.5 && c.left < r.right - 0.5).length,
+        offEdge: others.filter(r => r.left < tb.left - 0.5 || r.right > tb.right + 0.5).length,
+        height: tb.height,
+    };
+}"""
+
+
+@pytest.mark.parametrize('width', [1920, 1366, 1024])
+def test_preview_is_centred_and_nothing_crowds_it(gallery, page, width):
+    """A long file name gives way rather than pushing Preview off centre."""
+    gallery.write(LONG_NAME, '# notes\n')
+    page.set_viewport_size({'width': width, 'height': 800})
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("category-playbook")')
+    page.wait_for_selector('#preview-btn:visible')
+    g = page.evaluate(TOOLBAR_GEOMETRY)
+    assert g['offset'] <= 1, g
+    assert g['overlaps'] == 0, g
+    assert g['offEdge'] == 0, g
+    # One line: nothing wraps when space gets tight.
+    assert g['height'] <= 56, g
+
+
+def test_the_file_name_has_a_fixed_cap_and_keeps_its_full_name(gallery, page):
+    gallery.write(LONG_NAME, '# notes\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("category-playbook")')
+    page.wait_for_selector('#preview-btn:visible')
+    name = page.locator('#detail-filename')
+    m = name.evaluate("""el => ({ w: el.getBoundingClientRect().width,
+        ch: parseFloat(getComputedStyle(el).fontSize) * 0.6,
+        cap: getComputedStyle(el).maxWidth,
+        truncated: el.scrollWidth > el.clientWidth })""")
+    assert m['cap'] != 'none', m
+    assert m['truncated'] is True, m
+    assert name.get_attribute('title') == LONG_NAME
+
+
+def test_the_sidebar_and_its_button_are_gone(gallery, page):
+    gallery.write('doc.md', '# x\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("doc.md")')
+    page.wait_for_selector('#export-btn:visible')
+    assert page.locator('.hamburger').count() == 0
+    assert page.locator('#detail-sidebar').count() == 0
+    assert page.evaluate("() => typeof renderSidebar") == 'undefined'
+
+
+def test_view_as_sits_left_of_the_file_name(gallery, page):
+    gallery.write('doc.md', '# x\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("doc.md")')
+    page.wait_for_selector('#view-as-wrap:visible')
+    order = page.evaluate("""() => [...document.querySelector('.toolbar-left').children]
+        .filter(el => el.offsetParent !== null).map(el => el.id || el.className)""")
+    assert order[:3] == ['back-btn', 'view-as-wrap', 'detail-filename'], order
+
+
+def test_the_back_arrow_wears_the_logo_colour(gallery, page):
+    gallery.write('doc.md', '# x\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.card:has-text("doc.md")')
+    page.wait_for_selector('.back-arrow')
+    arrow, logo = page.evaluate("""() => [
+        getComputedStyle(document.querySelector('.back-arrow')).color,
+        getComputedStyle(document.querySelector('.home-title em')).color]""")
+    assert arrow == logo, (arrow, logo)
+
+
+@pytest.mark.parametrize('name,expected', [
+    ('doc.md', ['As is (.md)', 'HTML document (.html)', 'PDF (via print)', 'Word-compatible (.doc)']),
+    ('data.json', ['As is (.json)']),
+])
+def test_export_leads_with_the_file_as_it_is(gallery, page, name, expected):
+    """Save As became Export > As is, so Export is offered for every file."""
+    gallery.write(name, '{"a": 1}\n' if name.endswith('.json') else '# x\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click(f'.card:has-text("{name}")')
+    page.wait_for_selector('#export-btn:visible')
+    assert page.locator('#saveas-btn').count() == 0
+    page.click('#export-btn')
+    page.wait_for_selector('#export-menu.visible')
+    items = page.evaluate(
+        "() => [...document.querySelectorAll('#export-menu .export-item')].map(i => i.textContent)")
+    assert items == expected, items
 
 
 # ── preview toggle ────────────────────────────────────────────────────
