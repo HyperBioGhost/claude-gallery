@@ -679,6 +679,10 @@
     color: var(--accent);
   }
   .toolbar-btn[style*="display: none"] { display: none; }
+  /* Icon only: the toolbar is already full, and the tooltip names the action. */
+  .toolbar-btn.delete-btn { padding: 5px 8px; line-height: 0; }
+  .toolbar-btn.delete-btn svg { width: 14px; height: 14px; }
+  .toolbar-btn.delete-btn:hover { border-color: var(--danger); color: white; background: var(--danger); }
 
   /* Save status */
   .save-status {
@@ -1043,6 +1047,10 @@
         <div class="export-menu" id="export-menu"></div>
       </div>
       <a class="toolbar-btn" id="detail-open" href="#" target="_blank">Open in tab &#8599;</a>
+      <button class="toolbar-btn delete-btn" id="delete-btn" onclick="deleteActive()" style="display:none"
+              aria-label="Delete" title="Delete"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.8 6.8v4.4M9.2 6.8v4.4"/></svg></button>
     </div>
   </div>
   <div class="detail-body">
@@ -2385,10 +2393,11 @@
     delBtn.style.display = selectMode ? '' : 'none';
   }
 
-  async function deleteSelected() {
-    const checks = document.querySelectorAll('.card .select-check:checked');
-    const names = Array.from(checks).map(c => c.dataset.name);
-    if (names.length === 0) return;
+  // Ask once, then delete. Shared by Select mode and the detail view, so both
+  // say the same true thing about each kind of artifact. Resolves to true when
+  // the user confirmed and every removal went through.
+  async function confirmAndDelete(names) {
+    if (names.length === 0) return false;
     // A linked artifact only has a pointer here, so saying "permanently
     // delete" about the asset would be false.
     // An unsaved paste is not in the artifacts folder at all, so /delete
@@ -2418,26 +2427,60 @@
              '?\n\nThe asset stays where it is; only the link is removed.\n\n' +
              linkedNames.join('\n') + '\n\n';
     }
-    if (!confirm(msg.trim())) return;
+    if (!confirm(msg.trim())) return false;
     try {
       if (unsavedPicked.length) await discardUnsaved(unsavedPicked);
-      if (!plain.length && !linkedNames.length) {
-        toggleSelectMode();
-        return;
-      }
+      if (!plain.length && !linkedNames.length) return true;
       const res = await fetch('/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ files: plain.concat(linkedNames) })
       });
-      if (res.ok) {
-        const data = await res.json();
-        files = files.filter(f => !data.deleted.includes(f.name));
-        data.deleted.forEach(n => thumbnailMtimeByName.delete(n));
-        applyFilters();
-        renderGrid();
-      }
-    } catch(e) { alert('Delete failed: ' + e.message); }
+      if (!res.ok) throw new Error((await res.text()) || ('HTTP ' + res.status));
+      const data = await res.json();
+      files = files.filter(f => !data.deleted.includes(f.name));
+      data.deleted.forEach(n => thumbnailMtimeByName.delete(n));
+      applyFilters();
+      renderGrid();
+      const missed = plain.concat(linkedNames).filter(n => !data.deleted.includes(n));
+      if (missed.length) throw new Error('not removed: ' + missed.join(', '));
+      return true;
+    } catch(e) {
+      alert('Delete failed: ' + e.message);
+      return false;
+    }
+  }
+
+  async function deleteSelected() {
+    const checks = document.querySelectorAll('.card .select-check:checked');
+    const names = Array.from(checks).map(c => c.dataset.name);
+    const unsavedOnly = names.length > 0 && names.every(n => {
+      const f = files.find(x => x.name === n);
+      return f && f.unsaved;
+    });
+    if (await confirmAndDelete(names) && unsavedOnly) toggleSelectMode();
+  }
+
+  // The artifact on screen. Leaving afterwards skips the unsaved-paste
+  // question: discarding it was the answer.
+  async function deleteActive() {
+    if (!activeFile || editMode) return;
+    if (await confirmAndDelete([activeFile.name])) {
+      viewAsExt = null;
+      goHomeWithoutAsking();
+    }
+  }
+
+  function syncDeleteButton() {
+    const btn = document.getElementById('delete-btn');
+    // Hidden while editing: Cancel and Save are the ways out of an edit.
+    btn.style.display = activeFile && !editMode ? '' : 'none';
+    if (!activeFile) return;
+    const label = activeFile.unsaved ? 'Discard this paste'
+                : activeFile.linked ? 'Remove this link (the asset stays)'
+                : 'Delete this artifact';
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
   }
 
   // ── Detail View ───────────────────────────────────────────────────
@@ -2469,6 +2512,7 @@
 
     syncPreviewButton();
     syncViewAs();
+    syncDeleteButton();
     renderPreview(f);
     if (FRAME_THUMBNAIL_EXT.includes(ext)) queueThumbnailCapture(f.name, true);
   }
@@ -2833,6 +2877,7 @@
       document.getElementById('save-btn').style.display = '';
       syncPreviewButton();
       syncViewAs();
+      syncDeleteButton();
       ta.focus();
     });
   }
@@ -2850,6 +2895,7 @@
     editMode = false;
     syncPreviewButton();
     syncViewAs();
+    syncDeleteButton();
     livePreviewExt = null;
     // Drop the pending re-render and release the blob, or the URL leaks for the
     // lifetime of the tab every time an HTML file is edited.

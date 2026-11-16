@@ -1911,6 +1911,114 @@ def test_delete_removes_the_card(gallery, page):
     assert not (gallery.root / 'doomed.md').exists()
 
 
+def open_card(page, name):
+    page.click(f'.card:has-text("{name}")')
+    page.wait_for_selector('#delete-btn:visible')
+
+
+def test_deleting_from_the_artifact_view_returns_home(gallery, page):
+    gallery.write('doomed.md', 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    open_card(page, 'doomed.md')
+    assert page.locator('#delete-btn').get_attribute('title') == 'Delete this artifact'
+    prompts = []
+    page.on('dialog', lambda d: (prompts.append(d.message), d.accept()))
+    page.click('#delete-btn')
+    page.wait_for_selector('#homepage:not(.hidden)', timeout=5000)
+    assert prompts and prompts[0].startswith('PERMANENTLY DELETE 1 file'), prompts
+    assert 'doomed.md' in prompts[0]
+    assert not (gallery.root / 'doomed.md').exists()
+    assert page.locator('.card:has-text("doomed.md")').count() == 0
+    assert not page.locator('#detail-view').is_visible()
+
+
+def test_cancelling_a_delete_keeps_the_artifact_open(gallery, page):
+    gallery.write('keeper.md', '# still here\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    open_card(page, 'keeper.md')
+    page.on('dialog', lambda d: d.dismiss())
+    page.click('#delete-btn')
+    page.wait_for_timeout(300)
+    assert (gallery.root / 'keeper.md').is_file()
+    assert page.locator('#detail-view').is_visible()
+    assert page.locator('#detail-filename').inner_text() == 'keeper.md'
+
+
+def test_removing_a_link_from_the_artifact_view_keeps_the_asset(gallery, page):
+    outside = gallery.root.parent / 'project'
+    outside.mkdir(exist_ok=True)
+    asset = outside / 'bed.wav'
+    asset.write_bytes(_wav_bytes())
+    link_to(gallery, 'music.wav', asset)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    open_card(page, 'music.wav')
+    assert 'the asset stays' in page.locator('#delete-btn').get_attribute('title')
+    prompts = []
+    page.on('dialog', lambda d: (prompts.append(d.message), d.accept()))
+    page.click('#delete-btn')
+    page.wait_for_selector('#homepage:not(.hidden)', timeout=5000)
+    assert prompts and 'only the link is removed' in prompts[0], prompts
+    assert 'PERMANENTLY DELETE' not in prompts[0]
+    assert asset.is_file(), 'the asset must survive'
+    assert not (gallery.root / 'music.wav.link').exists()
+
+
+def test_discarding_a_paste_from_its_view_asks_once(gallery, page):
+    paste_text(page, '# Scratch notes\n\nthrowaway')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    assert page.locator('#delete-btn').get_attribute('title') == 'Discard this paste'
+    prompts = []
+    page.on('dialog', lambda d: (prompts.append(d.message), d.accept()))
+    page.click('#delete-btn')
+    page.wait_for_selector('#homepage:not(.hidden)', timeout=5000)
+    assert prompts and prompts[0].startswith('DISCARD 1 unsaved paste'), prompts
+    # Discarding was the answer; the leave question must not follow it.
+    assert not page.locator('#leave-guard.visible').count()
+    assert not (gallery.root / '.unsaved' / 'scratch-notes.md').exists()
+    assert not (gallery.root / 'scratch-notes.md').exists()
+    assert page.locator('.card:has-text("scratch-notes.md")').count() == 0
+
+
+def test_delete_is_hidden_while_editing(gallery, page):
+    gallery.write('doc.md', '# hi\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    open_editor(page, 'doc.md')
+    assert not page.locator('#delete-btn').is_visible()
+    page.click('#edit-btn')                      # Cancel
+    page.wait_for_selector('#delete-btn:visible')
+
+
+def test_a_failed_delete_says_so_and_stays(gallery, page):
+    gallery.write('stuck.md', 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    open_card(page, 'stuck.md')
+    page.route('**/delete', lambda r: r.fulfill(status=500, body='disk on fire'))
+    msgs = []
+    page.on('dialog', lambda d: (msgs.append(d.message), d.accept()))
+    page.click('#delete-btn')
+    page.wait_for_timeout(500)
+    assert len(msgs) == 2, msgs                  # the confirm, then the failure
+    assert msgs[1].startswith('Delete failed') and 'disk on fire' in msgs[1], msgs
+    assert page.locator('#detail-view').is_visible()
+    assert (gallery.root / 'stuck.md').is_file()
+
+
+def test_the_unsaved_toolbar_fits_on_one_line_at_1024(gallery, page):
+    """The widest toolbar: unsaved badge, Save to gallery, Edit, Export, Open, Delete."""
+    page.set_viewport_size({'width': 1024, 'height': 800})
+    paste_text(page, '# A very long heading that becomes a very long pasted file name\n\nx')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    page.wait_for_selector('#preview-btn:visible')
+    g = page.evaluate(TOOLBAR_GEOMETRY)
+    assert g['overlaps'] == 0 and g['offEdge'] == 0, g
+    assert g['height'] <= 56, g
+
+
 # ── no console errors anywhere ────────────────────────────────────────
 
 def test_no_uncaught_page_errors(gallery, page):
