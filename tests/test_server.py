@@ -1268,13 +1268,18 @@ def test_listing_never_opens_the_files_it_lists(gallery, monkeypatch):
     real_stat = _os.stat
     norm = lambda s: _os.path.normcase(_os.path.abspath(s))
     root = norm(str(gallery.root))
+    # Folders (.unsaved, .history) are checked for existence and never
+    # replaced, so stat-ing them is harmless; only files count.
+    folders = {n for n in _os.listdir(gallery.root) if _os.path.isdir(_os.path.join(gallery.root, n))}
+    folders |= {'.unsaved', '.history', '.card-thumbnails'}
     opened = []
 
     # Strings only inside the spy: Path.resolve() calls os.stat on some
     # Pythons (3.12), which recursed into the spy forever on CI.
     def spy(path, *a, **k):
         s = _os.fspath(path) if not isinstance(path, int) else ''
-        if s and _os.path.dirname(norm(s)) == root and not s.endswith('.link'):
+        if (s and _os.path.dirname(norm(s)) == root and not s.endswith('.link')
+                and _os.path.basename(s) not in folders):
             opened.append(_os.path.basename(s))
         return real_stat(path, *a, **k)
 
