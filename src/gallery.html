@@ -507,6 +507,191 @@
   .home-action-btn.danger { border-color: var(--danger); color: var(--danger); }
   .home-action-btn.danger:hover { background: var(--danger); color: white; }
 
+  /* ── Collections ──────────────────────────────────────────────── */
+  /* A cover is hue × pattern. The patterns are drawn from circles, blocks and
+     long bars, so two piles differ in form as well as in colour. The stored
+     value is a name; these rules are the only place it becomes a colour. */
+  [data-color] {
+    --c: oklch(56% 0.15 var(--h, 260));
+    --t: oklch(95% 0.03 var(--h, 260));
+  }
+  [data-color="red"]    { --h: 28; }
+  [data-color="orange"] { --h: 55; }
+  [data-color="amber"]  { --h: 80; --c: oklch(62% 0.14 80); }
+  [data-color="green"]  { --h: 150; }
+  [data-color="teal"]   { --h: 195; }
+  [data-color="blue"]   { --h: 255; }
+  [data-color="violet"] { --h: 305; }
+  [data-color="slate"]  { --c: oklch(50% 0.03 260); --t: oklch(94% 0.008 260); }
+  .cover { background-color: var(--t); }
+  .cover[data-pattern="dots"] {
+    background: radial-gradient(circle, var(--c) 0 4px, transparent 4.5px) 0 0 / 18px 18px, var(--t);
+  }
+  .cover[data-pattern="spots"] {
+    background:
+      radial-gradient(circle, var(--c) 0 10px, transparent 10.5px) 0 0 / 48px 48px,
+      radial-gradient(circle, var(--c) 0 10px, transparent 10.5px) 24px 24px / 48px 48px, var(--t);
+  }
+  .cover[data-pattern="checks"] {
+    background: conic-gradient(var(--c) 25%, transparent 0 50%, var(--c) 0 75%, transparent 0) 0 0 / 32px 32px, var(--t);
+  }
+  .cover[data-pattern="grid"] {
+    background:
+      linear-gradient(var(--c) 0 3px, transparent 3px) 0 0 / 22px 22px,
+      linear-gradient(90deg, var(--c) 0 3px, transparent 3px) 0 0 / 22px 22px, var(--t);
+  }
+  .cover[data-pattern="stripes"] {
+    background: repeating-linear-gradient(135deg, var(--c) 0 7px, transparent 7px 20px), var(--t);
+  }
+  .cover[data-pattern="bars"] {
+    background: repeating-linear-gradient(0deg, var(--c) 0 6px, transparent 6px 26px), var(--t);
+  }
+
+  /* A collection card reads as a pile: two sheets sit behind it. */
+  .collection-card {
+    box-shadow: 5px -5px 0 -1px white, 5px -5px 0 0 var(--rule),
+                10px -10px 0 -2px white, 10px -10px 0 -1px var(--rule), var(--card-shadow);
+    overflow: visible;
+  }
+  .collection-card:hover {
+    box-shadow: 5px -5px 0 -1px white, 5px -5px 0 0 var(--rule),
+                10px -10px 0 -2px white, 10px -10px 0 -1px var(--rule), var(--card-shadow-hover);
+  }
+  .collection-card .card-preview { border-radius: 10px 10px 0 0; }
+  .collection-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  /* Said in words at the type floor, not in a 10px badge. */
+  .collection-line { font-size: 12px; color: var(--ink-soft); }
+  .collection-kind { font-weight: 600; color: var(--ink); }
+  /* Collections are opened, not selected: in Select mode they step back. */
+  body.select-mode .collection-card { opacity: 0.4; pointer-events: none; }
+
+  /* Where a filed artifact lives, shown when a search or chip reaches it. */
+  .card-collection {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Too small to show a pattern: the tag's dot is the colour alone. */
+  .card-collection .dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: var(--c);
+  }
+  .collection-crumb .cover {
+    width: 22px; height: 22px; border-radius: 50%;
+    flex-shrink: 0; box-shadow: inset 0 0 0 1px var(--c);
+  }
+
+  .collection-bar {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 6px 0 10px;
+  }
+  .collection-bar.visible { display: flex; }
+  .crumb-home {
+    background: none;
+    border: none;
+    padding: 4px 0;
+    cursor: pointer;
+    font: 500 14px var(--sans);
+    color: var(--ink-soft);
+  }
+  .crumb-home:hover { color: var(--accent); }
+  .crumb-arrow { color: var(--accent); margin-right: 6px; }
+  .crumb-sep { color: var(--ink-faint); }
+  .collection-crumb { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .collection-title {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 26px;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+  .collections-error { font-size: 14px; color: var(--danger); margin: -28px 0 28px; }
+  .collections-error:empty { display: none; }
+
+  /* Add to collection / edit collection */
+  #collection-dialog {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: oklch(22% 0.03 260 / 0.45);
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  #collection-dialog.visible { display: flex; }
+  .collection-box {
+    background: white;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    box-shadow: var(--card-shadow-hover);
+    width: min(520px, 100%);
+    max-height: calc(100dvh - 48px);
+    overflow-y: auto;
+    padding: 28px 30px;
+  }
+  .collection-box h2 {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 400;
+    margin-bottom: 16px;
+    color: var(--ink);
+  }
+  .cd-options { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+  .cd-options[hidden] { display: none; }
+  .cd-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+    color: var(--ink);
+  }
+  .cd-option:hover { background: var(--paper-warm); }
+  .cd-option:has(input:checked) { border-color: var(--ink); }
+  .cd-option input { accent-color: var(--ink); margin: 0; }
+  .cd-option .cover { width: 24px; height: 24px; border-radius: 4px; flex-shrink: 0; }
+  .cd-option-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .cd-option-count { font-size: 13px; color: var(--ink-faint); }
+  .cd-new { display: flex; flex-direction: column; gap: 10px; }
+  .cd-new[hidden] { display: none; }
+  .cd-label { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+  #cd-name {
+    font: 16px var(--sans);
+    padding: 9px 12px;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    color: var(--ink);
+  }
+  #cd-name:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  .cd-preview { height: 64px; border-radius: 8px; }
+  .cd-swatches { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .cd-swatch { position: relative; cursor: pointer; display: block; line-height: 0; }
+  .cd-swatch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .cd-swatch .chip { display: block; }
+  .cd-swatch .chip.dot { width: 28px; height: 28px; border-radius: 50%; background: var(--c); }
+  .cd-swatch .chip.cover { width: 40px; height: 40px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--rule); }
+  .cd-swatch input:checked + .chip { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .cd-swatch input:focus-visible + .chip { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .cd-shuffle { align-self: flex-start; }
+  .cd-note { font-size: 14px; color: var(--ink-soft); margin-top: 14px; }
+  .cd-error { font-size: 14px; color: var(--danger); margin-top: 10px; }
+  .cd-note:empty, .cd-error:empty { display: none; }
+  .collection-box .guard-actions {
+    display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; flex-wrap: wrap;
+  }
+
   /* Drop overlay */
   #drop-overlay {
     position: fixed;
@@ -983,7 +1168,18 @@
 <div id="homepage">
   <div class="home-header">
     <h1 class="home-title"><em>Gallery</em></h1>
+    <div class="collection-bar" id="collection-bar">
+      <button class="crumb-home" onclick="openCollection(null)"><span class="crumb-arrow" aria-hidden="true">&#8592;</span>All artifacts</button>
+      <span class="crumb-sep" aria-hidden="true">/</span>
+      <span class="collection-crumb">
+        <span class="cover" id="collection-swatch" aria-hidden="true"></span>
+        <h2 class="collection-title" id="collection-title"></h2>
+      </span>
+      <button class="home-action-btn" onclick="openCollectionDialog('edit')">Edit collection</button>
+      <button class="home-action-btn danger" onclick="deleteOpenCollection()">Delete collection</button>
+    </div>
     <p class="home-sub" id="file-count">Loading artifacts...</p>
+    <p class="collections-error" id="collections-error" role="alert"></p>
     <div class="search-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
       <input type="text" id="search" placeholder="Search artifacts..." autocomplete="off">
@@ -1002,7 +1198,9 @@
     <div class="home-actions">
       <button class="home-action-btn" id="import-btn" onclick="document.getElementById('import-input').click()">Import files</button>
       <input type="file" id="import-input" multiple style="display:none" onchange="handleImportInput(event)">
-      <button class="home-action-btn" id="select-mode-btn" onclick="toggleSelectMode()">Select</button>
+      <button class="home-action-btn" id="select-mode-btn" onclick="toggleSelectMode()">Select&hellip;</button>
+      <button class="home-action-btn" id="add-to-collection-btn" onclick="openCollectionDialog('add')" style="display:none">Add to collection</button>
+      <button class="home-action-btn" id="remove-from-collection-btn" onclick="removeSelectedFromCollection()" style="display:none">Remove from collection</button>
       <button class="home-action-btn danger" id="delete-selected-btn" onclick="deleteSelected()" style="display:none">Delete Selected</button>
       <span id="import-status"></span>
       <span class="home-meta">
@@ -1083,6 +1281,29 @@
   </div>
 </div>
 
+<div id="collection-dialog" role="dialog" aria-modal="true" aria-labelledby="cd-title">
+  <form class="collection-box" id="cd-form" onsubmit="submitCollectionDialog(event)" novalidate>
+    <h2 id="cd-title"></h2>
+    <div class="cd-options" id="cd-options"></div>
+    <div class="cd-new" id="cd-new">
+      <label class="cd-label" for="cd-name">Name</label>
+      <input id="cd-name" type="text" maxlength="60" autocomplete="off" placeholder="e.g. Category Playbook">
+      <div class="cd-preview cover" id="cd-preview" aria-hidden="true"></div>
+      <div class="cd-label" id="cd-color-label">Colour</div>
+      <div class="cd-swatches" id="cd-colors" role="radiogroup" aria-labelledby="cd-color-label"></div>
+      <div class="cd-label" id="cd-pattern-label">Pattern</div>
+      <div class="cd-swatches" id="cd-patterns" role="radiogroup" aria-labelledby="cd-pattern-label"></div>
+      <button type="button" class="toolbar-btn cd-shuffle" id="cd-shuffle" onclick="shuffleCombo()">Shuffle</button>
+    </div>
+    <p class="cd-note" id="cd-note"></p>
+    <p class="cd-error" id="cd-error" role="alert"></p>
+    <div class="guard-actions">
+      <button type="button" class="toolbar-btn" id="cd-cancel" onclick="closeCollectionDialog()">Cancel</button>
+      <button type="submit" class="toolbar-btn primary" id="cd-submit"></button>
+    </div>
+  </form>
+</div>
+
 <div id="drop-overlay">
   <div class="drop-box">
     <div class="drop-icon">&#8681;</div>
@@ -1143,7 +1364,10 @@
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
-      status.textContent = data.imported.length + ' imported';
+      // New artifacts always land on the homepage, even when dropped here
+      // while a collection is open; say so, or they seem to vanish.
+      status.textContent = data.imported.length + ' imported' +
+        (openCollectionId ? ' to the homepage' : '');
       status.style.color = 'var(--success)';
       setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 2500);
       await loadFiles();
@@ -1622,6 +1846,18 @@
   let countByExt = new Map();        // extension -> matches within the current search
   const groupHeaderByKey = new Map();
   const foldedGroups = new Set();    // '<mode>:<group key>'
+  // Collections, as the server keeps them. An artifact is in at most one, and
+  // while it is, the homepage shows it only through that collection's card.
+  let collections = [];
+  let memberOf = new Map();          // artifact name -> its collection
+  let openCollectionId = null;       // null = the homepage
+  let filteredCollections = [];      // the collection cards the grid shows
+  const collectionCardById = new Map();
+  const COLLECTIONS_GROUP = '__collections__';
+  const COLLECTION_COLORS = [['red', 'Red'], ['orange', 'Orange'], ['amber', 'Amber'],
+    ['green', 'Green'], ['teal', 'Teal'], ['blue', 'Blue'], ['violet', 'Violet'], ['slate', 'Slate']];
+  const COLLECTION_PATTERNS = [['dots', 'Dots'], ['spots', 'Spots'], ['checks', 'Checks'],
+    ['grid', 'Grid'], ['stripes', 'Stripes'], ['bars', 'Bars']];
   let selectMode = false;
   let editMode = false;
   let livePreviewExt = null;
@@ -1832,6 +2068,7 @@
       files.forEach(f => {
         if (f.thumbnail_mtime) thumbnailMtimeByName.set(f.name, f.thumbnail_mtime);
       });
+      setCollections(data.collections || [], data.collections_error || '');
       applyFilters();
       renderGrid();
     } catch {
@@ -1927,6 +2164,12 @@
   }
 
   function getCard(f) {
+    const el = getCardNode(f);
+    syncCollectionTag(el, f.name);
+    return el;
+  }
+
+  function getCardNode(f) {
     const cached = cardCache.get(f.name);
     // Reuse the existing node unless the file actually changed on disk
     if (cached && cached.mtime === f.mtime) {
@@ -1950,7 +2193,9 @@
   // counts describe what the current search can actually reach.
   function applyFilters() {
     const q = document.getElementById('search').value.trim();
-    const searchMatched = q ? files.filter(f => fuzzyMatch(q, f.name)) : files.slice();
+    const open = openCollection_();
+    const scope = open ? files.filter(f => memberOf.get(f.name) === open) : files;
+    const searchMatched = q ? scope.filter(f => fuzzyMatch(q, f.name)) : scope.slice();
 
     countByExt = new Map();
     searchMatched.forEach(f => {
@@ -1958,26 +2203,39 @@
       countByExt.set(e, (countByExt.get(e) || 0) + 1);
     });
 
-    filtered = extFilter
+    let shown = extFilter
       ? searchMatched.filter(f => (getExt(f.name) || '(none)') === extFilter)
       : searchMatched;
+    // Browsing the homepage, a filed artifact is reached through its
+    // collection's card. A search or a type chip reaches inside collections,
+    // so nothing filed away becomes unfindable.
+    const browsing = !open && !q && !extFilter;
+    if (browsing) shown = shown.filter(f => !memberOf.has(f.name));
+    filtered = shown;
+    filteredCollections = (open || extFilter) ? [] : collections
+      .filter(c => !q || fuzzyMatch(q, c.name))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
-    renderTypeChips(searchMatched.length);
-    renderCounts();
+    renderTypeChips(searchMatched.length, scope);
+    renderCounts(scope, browsing);
   }
 
-  function renderCounts() {
-    const n = files.length;
-    const label = n + ' artifact' + (n !== 1 ? 's' : '');
-    document.getElementById('file-count').textContent =
-      filtered.length === n ? label : filtered.length + ' of ' + label;
+  function renderCounts(scope, browsing) {
+    const n = scope.length;
+    let label = n + ' artifact' + (n !== 1 ? 's' : '');
+    if (openCollectionId) label += ' in this collection';
+    let text = (browsing || filtered.length === n) ? label : filtered.length + ' of ' + label;
+    if (!openCollectionId && collections.length) {
+      text += ' · ' + collections.length + ' collection' + (collections.length !== 1 ? 's' : '');
+    }
+    document.getElementById('file-count').textContent = text;
   }
 
   // Chips come from the types actually present, so the row never offers a
   // filter that matches nothing in the collection.
-  function renderTypeChips(searchTotal) {
+  function renderTypeChips(searchTotal, scope) {
     const present = new Map();
-    files.forEach(f => {
+    scope.forEach(f => {
       const e = getExt(f.name) || '(none)';
       present.set(e, (present.get(e) || 0) + 1);
     });
@@ -2047,6 +2305,7 @@
   }
 
   function groupLabelOf(key) {
+    if (key === COLLECTIONS_GROUP) return 'Collections';
     if (groupBy === 'ext') return key === '(none)' ? 'No extension' : '.' + key;
     const hit = DATE_GROUPS.find(g => g[0] === key);
     return hit ? hit[1] : key;
@@ -2099,13 +2358,15 @@
       empty.innerHTML = '<div class="icon">&#8709;</div><div class="msg"></div>';
       grid.appendChild(empty);
     }
-    empty.style.display = filtered.length === 0 ? '' : 'none';
-    if (filtered.length === 0) {
+    const nothing = filtered.length === 0 && filteredCollections.length === 0;
+    empty.style.display = nothing ? '' : 'none';
+    if (nothing) {
       const q = document.getElementById('search').value.trim();
       empty.querySelector('.msg').textContent =
         q && extFilter ? 'No ' + chipLabel(extFilter) + ' artifacts match "' + q + '"'
         : extFilter ? 'No ' + chipLabel(extFilter) + ' artifacts yet'
         : q ? 'No artifacts match "' + q + '"'
+        : openCollectionId ? 'This collection is empty'
         : 'No artifacts yet';
     }
 
@@ -2114,14 +2375,21 @@
       const el = getCard(f);
       if (el.parentNode !== grid) grid.appendChild(el);
     });
+    collections.forEach(c => {
+      const el = getCollectionCard(c);
+      if (el.parentNode !== grid) grid.appendChild(el);
+    });
 
     // Filter, order and grouping purely via CSS so no DOM nodes are relocated:
     // moving a card would reload its thumbnail, and its iframe in the no-CDN
     // fallback. Headers take part in the same `order` sequence.
     const rank = new Map();
+    const collectionRank = new Map();
     const liveGroups = new Set();
     if (groupBy === 'none') {
-      filtered.forEach((f, i) => rank.set(f.name, i));
+      // Collections lead, like folders.
+      filteredCollections.forEach((c, i) => collectionRank.set(c.id, i));
+      filtered.forEach((f, i) => rank.set(f.name, filteredCollections.length + i));
     } else {
       const members = new Map();
       filtered.forEach(f => {
@@ -2130,6 +2398,15 @@
         members.get(k).push(f);
       });
       let seat = 0;
+      if (filteredCollections.length) {
+        const header = groupHeader(COLLECTIONS_GROUP, filteredCollections.length, grid);
+        header.style.display = '';
+        header.style.order = seat++;
+        liveGroups.add(COLLECTIONS_GROUP);
+        if (!isFolded(COLLECTIONS_GROUP)) {
+          filteredCollections.forEach(c => collectionRank.set(c.id, seat++));
+        }
+      }
       for (const k of sortGroupKeys([...members.keys()], k2 => members.get(k2).length)) {
         const header = groupHeader(k, members.get(k).length, grid);
         header.style.display = '';
@@ -2157,6 +2434,15 @@
       }
     });
 
+    collectionCardById.forEach((el, id) => {
+      if (collectionRank.has(id)) {
+        el.style.display = '';
+        el.style.order = collectionRank.get(id);
+      } else {
+        el.style.display = 'none';
+      }
+    });
+
     // Drop cards for files that no longer exist
     const live = new Set(files.map(f => f.name));
     for (const [name, { el }] of Array.from(cardCache.entries())) {
@@ -2164,6 +2450,361 @@
         el.remove();
         cardCache.delete(name);
       }
+    }
+    const liveCollections = new Set(collections.map(c => c.id));
+    for (const [id, el] of Array.from(collectionCardById.entries())) {
+      if (!liveCollections.has(id)) {
+        el.remove();
+        collectionCardById.delete(id);
+      }
+    }
+  }
+
+  // ── Collections ───────────────────────────────────────────────────
+
+  function openCollection_() {
+    return openCollectionId ? collections.find(c => c.id === openCollectionId) || null : null;
+  }
+
+  function setCollections(list, error) {
+    collections = list;
+    memberOf = new Map();
+    collections.forEach(c => c.artifacts.forEach(n => memberOf.set(n, c)));
+    // Deleted elsewhere (another tab, or Claude): fall back to the homepage.
+    if (openCollectionId && !openCollection_()) openCollectionId = null;
+    if (error !== undefined) {
+      document.getElementById('collections-error').textContent =
+        error ? 'Collections could not be loaded: ' + error : '';
+    }
+    syncCollectionBar();
+  }
+
+  function getCollectionCard(c) {
+    let el = collectionCardById.get(c.id);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'card collection-card';
+      el.dataset.collection = c.id;
+      el.tabIndex = 0;
+      el.setAttribute('role', 'button');
+      el.innerHTML =
+        '<div class="card-preview cover" aria-hidden="true"></div>' +
+        '<div class="card-info"><div class="card-name"></div>' +
+        '<div class="card-meta"><span class="collection-line">' +
+        '<span class="collection-kind">Collection</span> · <span class="collection-count"></span>' +
+        '</span></div></div>';
+      const go = () => { if (!selectMode) openCollection(el.dataset.collection); };
+      el.onclick = go;
+      el.onkeydown = e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+      };
+      collectionCardById.set(c.id, el);
+    }
+    const cover = el.querySelector('.cover');
+    cover.dataset.color = c.color;
+    cover.dataset.pattern = c.pattern;
+    const name = el.querySelector('.card-name');
+    name.textContent = c.name;
+    name.title = c.name;
+    const count = c.artifacts.length + ' artifact' + (c.artifacts.length !== 1 ? 's' : '');
+    el.querySelector('.collection-count').textContent = count;
+    el.setAttribute('aria-label', 'Open collection ' + c.name + ', ' + count);
+    return el;
+  }
+
+  // On the homepage, a filed artifact that a search or chip brings up says
+  // which collection it lives in. Inside that collection it would be noise.
+  function syncCollectionTag(el, name) {
+    const c = openCollectionId ? null : memberOf.get(name);
+    let tag = el.querySelector('.card-collection');
+    if (!c) { if (tag) tag.remove(); return; }
+    if (!tag) {
+      tag = document.createElement('div');
+      tag.className = 'card-collection';
+      tag.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="where"></span>';
+      el.querySelector('.card-info').appendChild(tag);
+    }
+    tag.querySelector('.dot').dataset.color = c.color;
+    tag.querySelector('.where').textContent = 'in ' + c.name;
+    tag.title = 'In the collection ' + c.name;
+  }
+
+  function syncCollectionBar() {
+    const open = openCollection_();
+    document.getElementById('collection-bar').classList.toggle('visible', !!open);
+    document.getElementById('search').placeholder =
+      open ? 'Search this collection...' : 'Search artifacts...';
+    document.getElementById('remove-from-collection-btn').style.display =
+      selectMode && open ? '' : 'none';
+    if (!open) return;
+    document.getElementById('collection-title').textContent = open.name;
+    const sw = document.getElementById('collection-swatch');
+    sw.dataset.color = open.color;
+    sw.dataset.pattern = open.pattern;
+  }
+
+  function openCollection(id) {
+    if (selectMode) toggleSelectMode();
+    openCollectionId = id;
+    // The search and the chip were for the view being left.
+    document.getElementById('search').value = '';
+    extFilter = null;
+    syncCollectionBar();
+    applyFilters();
+    renderGrid();
+    window.scrollTo(0, 0);
+  }
+
+  async function collectionsRequest(action, body) {
+    const res = await fetch('/collections/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error) || res.statusText || ('HTTP ' + res.status));
+    setCollections(data.collections);
+    applyFilters();
+    renderGrid();
+    return data.collections;
+  }
+
+  function flashStatus(text, ok) {
+    const status = document.getElementById('import-status');
+    status.textContent = text;
+    status.style.color = ok ? 'var(--success)' : 'var(--danger)';
+    clearTimeout(flashStatus.timer);
+    flashStatus.timer = setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 3500);
+  }
+
+  // Only what the user can see is acted on: a card checked and then hidden
+  // by a search, a fold or another view is left alone.
+  function selectedNames() {
+    return [...document.querySelectorAll('.card .select-check:checked')]
+      .filter(c => c.closest('.card').style.display !== 'none')
+      .map(c => c.dataset.name);
+  }
+
+  async function removeSelectedFromCollection() {
+    const names = selectedNames();
+    const open = openCollection_();
+    if (!names.length || !open) return;
+    try {
+      await collectionsRequest('remove', { id: open.id, artifacts: names });
+      toggleSelectMode();
+      flashStatus(names.length + ' moved back to the homepage', true);
+    } catch (e) { flashStatus('Could not remove: ' + e.message, false); }
+  }
+
+  async function deleteOpenCollection() {
+    const open = openCollection_();
+    if (!open) return;
+    const n = open.artifacts.length;
+    if (!confirm('Delete the collection "' + open.name + '"?\n\n' +
+                 (n ? 'Its ' + n + ' artifact' + (n !== 1 ? 's go' : ' goes') +
+                      ' back to the homepage. ' : '') + 'No files are deleted.')) return;
+    try {
+      await collectionsRequest('delete', { id: open.id });
+      openCollection(null);
+    } catch (e) { alert('Could not delete the collection: ' + e.message); }
+  }
+
+  // ── Collection dialog: add selected artifacts, or edit the open one ──
+
+  let dialog = null;   // { mode, names, color, pattern }
+
+  function unusedCombo(avoid) {
+    const used = new Set(collections.map(c => c.color + '/' + c.pattern));
+    if (avoid) used.add(avoid);
+    const all = [];
+    COLLECTION_COLORS.forEach(([k]) => COLLECTION_PATTERNS.forEach(([p]) => all.push([k, p])));
+    const free = all.filter(([k, p]) => !used.has(k + '/' + p));
+    const pool = free.length ? free : all.filter(([k, p]) => (k + '/' + p) !== avoid);
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  function openCollectionDialog(mode) {
+    const open = openCollection_();
+    if (mode === 'edit') {
+      if (!open) return;
+      dialog = { mode, names: [], color: open.color, pattern: open.pattern };
+    } else {
+      const names = selectedNames();
+      if (!names.length) { flashStatus('Select the artifacts to add first', false); return; }
+      const [color, pattern] = unusedCombo();
+      dialog = { mode, names, color, pattern };
+    }
+    const n = dialog.names.length;
+    document.getElementById('cd-title').textContent = mode === 'edit'
+      ? 'Edit collection'
+      : 'Add ' + n + ' artifact' + (n !== 1 ? 's' : '') + ' to a collection';
+    document.getElementById('cd-name').value = mode === 'edit' ? open.name : '';
+    document.getElementById('cd-error').textContent = '';
+
+    // Existing collections to add to, then "New collection". Not offered
+    // when editing, nor the collection the artifacts are already in.
+    const opts = document.getElementById('cd-options');
+    opts.innerHTML = '';
+    if (mode === 'add') {
+      collections.filter(c => c !== open)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach(c => opts.appendChild(targetOption(c.id, c.name, c.artifacts.length, c)));
+      opts.appendChild(targetOption('new', 'New collection', null, null));
+      opts.querySelector('input[value="new"]').checked = true;
+    }
+    opts.hidden = mode !== 'add';
+
+    renderSwatches();
+    syncDialog();
+    document.getElementById('collection-dialog').classList.add('visible');
+    document.getElementById('cd-name').focus();
+  }
+
+  function targetOption(value, label, count, c) {
+    const row = document.createElement('label');
+    row.className = 'cd-option';
+    row.innerHTML = '<input type="radio" name="cd-target"><span class="cover" aria-hidden="true"></span>' +
+                    '<span class="cd-option-name"></span><span class="cd-option-count"></span>';
+    const input = row.querySelector('input');
+    input.value = value;
+    input.onchange = syncDialog;
+    const cover = row.querySelector('.cover');
+    if (c) { cover.dataset.color = c.color; cover.dataset.pattern = c.pattern; }
+    else cover.remove();
+    row.querySelector('.cd-option-name').textContent = label;
+    row.querySelector('.cd-option-count').textContent =
+      count === null ? '' : count + ' artifact' + (count !== 1 ? 's' : '');
+    return row;
+  }
+
+  function renderSwatches() {
+    const colors = document.getElementById('cd-colors');
+    colors.innerHTML = '';
+    COLLECTION_COLORS.forEach(([k, label]) => {
+      colors.appendChild(swatch('cd-color', k, label, '<span class="chip dot" data-color="' + k + '"></span>',
+        () => { dialog.color = k; syncDialog(); }));
+    });
+    const patterns = document.getElementById('cd-patterns');
+    patterns.innerHTML = '';
+    COLLECTION_PATTERNS.forEach(([p, label]) => {
+      patterns.appendChild(swatch('cd-pattern', p, label, '<span class="chip cover" data-pattern="' + p + '"></span>',
+        () => { dialog.pattern = p; syncDialog(); }));
+    });
+  }
+
+  function swatch(group, value, label, chip, onpick) {
+    const l = document.createElement('label');
+    l.className = 'cd-swatch';
+    l.title = label;
+    l.innerHTML = '<input type="radio" name="' + group + '">' + chip;
+    const input = l.querySelector('input');
+    input.value = value;
+    input.setAttribute('aria-label', label);
+    input.onchange = onpick;
+    return l;
+  }
+
+  function dialogTarget() {
+    const picked = document.querySelector('#cd-options input[name="cd-target"]:checked');
+    return picked ? picked.value : 'new';
+  }
+
+  // One place turns the dialog's state into what it shows.
+  function syncDialog() {
+    if (!dialog) return;
+    const target = dialog.mode === 'edit' ? 'edit' : dialogTarget();
+    document.getElementById('cd-new').hidden = target !== 'new' && target !== 'edit';
+    document.querySelectorAll('#cd-colors input').forEach(i => { i.checked = i.value === dialog.color; });
+    document.querySelectorAll('#cd-patterns input').forEach(i => { i.checked = i.value === dialog.pattern; });
+    // Pattern chips show the chosen colour, so the pick is seen as it will look.
+    document.querySelectorAll('#cd-patterns .chip').forEach(ch => { ch.dataset.color = dialog.color; });
+    const preview = document.getElementById('cd-preview');
+    preview.dataset.color = dialog.color;
+    preview.dataset.pattern = dialog.pattern;
+
+    const dest = collections.find(c => c.id === target);
+    const moving = dialog.names.filter(n => memberOf.has(n) && memberOf.get(n) !== dest).length;
+    const open = openCollection_();
+    document.getElementById('cd-note').textContent = dialog.mode === 'add' && moving
+      ? (moving === dialog.names.length && open
+          ? 'They move out of ' + open.name + '.'
+          : moving + ' of these ' + (moving !== 1 ? 'are' : 'is') +
+            ' in another collection and will move.')
+      : '';
+    const n = dialog.names.length;
+    document.getElementById('cd-submit').textContent =
+      dialog.mode === 'edit' ? 'Save changes'
+      : target === 'new' ? 'Create and add ' + n
+      : 'Add ' + n + ' to ' + (dest ? dest.name : 'collection');
+  }
+
+  function shuffleCombo() {
+    const [color, pattern] = unusedCombo(dialog.color + '/' + dialog.pattern);
+    dialog.color = color;
+    dialog.pattern = pattern;
+    syncDialog();
+  }
+
+  function closeCollectionDialog() {
+    document.getElementById('collection-dialog').classList.remove('visible');
+    dialog = null;
+  }
+
+  // An unsaved paste is not an artifact yet; filing it is a choice to keep it.
+  async function saveUnsavedFirst(names) {
+    const out = [];
+    for (const n of names) {
+      const f = files_byName(n);
+      if (f && f.unsaved) {
+        const saved = await keepUnsaved(n);
+        if (!saved) throw new Error('could not save ' + n + ' to the gallery');
+        out.push(saved);
+      } else {
+        out.push(n);
+      }
+    }
+    return out;
+  }
+
+  async function submitCollectionDialog(e) {
+    e.preventDefault();
+    if (!dialog) return;
+    const err = document.getElementById('cd-error');
+    err.textContent = '';
+    const target = dialog.mode === 'edit' ? 'edit' : dialogTarget();
+    const name = document.getElementById('cd-name').value.trim().replace(/\s+/g, ' ');
+    if (target === 'new' || target === 'edit') {
+      if (!name) { err.textContent = 'Give the collection a name.'; return; }
+      const self = target === 'edit' ? openCollection_() : null;
+      const clash = collections.find(c => c !== self && c.name.toLowerCase() === name.toLowerCase());
+      if (clash) {
+        err.textContent = target === 'new'
+          ? 'There is already a collection called ' + clash.name + '. Pick it above to add to it.'
+          : 'There is already a collection called ' + clash.name + '.';
+        return;
+      }
+    }
+    const { mode, color, pattern } = dialog;
+    try {
+      if (mode === 'edit') {
+        await collectionsRequest('update', { id: openCollectionId, name, color, pattern });
+        closeCollectionDialog();
+        return;
+      }
+      const names = await saveUnsavedFirst(dialog.names);
+      let into;
+      if (target === 'new') {
+        await collectionsRequest('create', { name, color, pattern, artifacts: names });
+        into = name;
+      } else {
+        const list = await collectionsRequest('add', { id: target, artifacts: names });
+        into = (list.find(c => c.id === target) || {}).name || 'the collection';
+      }
+      closeCollectionDialog();
+      if (selectMode) toggleSelectMode();
+      flashStatus(names.length + ' added to ' + into, true);
+    } catch (ex) {
+      err.textContent = ex.message;
     }
   }
 
@@ -2387,10 +3028,16 @@
     selectMode = !selectMode;
     document.body.classList.toggle('select-mode', selectMode);
     const btn = document.getElementById('select-mode-btn');
-    const delBtn = document.getElementById('delete-selected-btn');
     btn.classList.toggle('active', selectMode);
-    btn.textContent = selectMode ? 'Cancel' : 'Select';
-    delBtn.style.display = selectMode ? '' : 'none';
+    btn.textContent = selectMode ? 'Cancel' : 'Select…';
+    document.getElementById('delete-selected-btn').style.display = selectMode ? '' : 'none';
+    document.getElementById('add-to-collection-btn').style.display = selectMode ? '' : 'none';
+    syncCollectionBar();
+    // Leaving Select mode drops the picks, so the next round starts clean
+    // rather than with checks left on cards since hidden.
+    if (!selectMode) {
+      document.querySelectorAll('.card .select-check:checked').forEach(c => { c.checked = false; });
+    }
   }
 
   // Ask once, then delete. Shared by Select mode and the detail view, so both
@@ -2440,6 +3087,10 @@
       const data = await res.json();
       files = files.filter(f => !data.deleted.includes(f.name));
       data.deleted.forEach(n => thumbnailMtimeByName.delete(n));
+      // The server drops them from their collection too; mirror it now
+      // rather than wait for the event.
+      collections.forEach(c => { c.artifacts = c.artifacts.filter(n => !data.deleted.includes(n)); });
+      setCollections(collections);
       applyFilters();
       renderGrid();
       const missed = plain.concat(linkedNames).filter(n => !data.deleted.includes(n));
@@ -2452,8 +3103,7 @@
   }
 
   async function deleteSelected() {
-    const checks = document.querySelectorAll('.card .select-check:checked');
-    const names = Array.from(checks).map(c => c.dataset.name);
+    const names = selectedNames();
     const unsavedOnly = names.length > 0 && names.every(n => {
       const f = files.find(x => x.name === n);
       return f && f.unsaved;
@@ -3249,6 +3899,7 @@
     const es = new EventSource('/events');
     es.onmessage = e => {
       const data = JSON.parse(e.data);
+      if (data.collections) { loadFiles(); return; }
       const fname = data.file;
       const existing = files.findIndex(f => f.name === fname);
       const entry = { name: fname, mtime: Date.now() };
@@ -3278,8 +3929,13 @@
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+      if (dialog) { closeCollectionDialog(); return; }
       if (editMode) { cancelEdit(); return; }
       if (activeFile) { goHome(); return; }
+      // Out of a collection, unless Escape is clearing a field being typed in.
+      if (openCollectionId && !e.target.closest('input, textarea, select')) {
+        openCollection(null); return;
+      }
     }
     if ((e.key === '/' || (e.ctrlKey && e.key === 'k')) && !activeFile) {
       e.preventDefault();

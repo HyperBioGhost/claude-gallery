@@ -490,7 +490,7 @@ def test_head_gives_the_headers_without_the_body(gallery):
     u = urlparse(gallery.base)
     with _socket.create_connection((u.hostname, u.port), timeout=10) as sk:
         sk.sendall(b'HEAD /files/clip.mp4 HTTP/1.1\r\n'
-                   b'Host: x\r\nConnection: close\r\n\r\n')
+                   b'Host: ' + u.netloc.encode() + b'\r\nConnection: close\r\n\r\n')
         sk.settimeout(5)
         raw = b''
         while True:
@@ -990,3 +990,405 @@ def test_a_linked_paste_cannot_change_type(gallery, tmp_path):
     asset.write_bytes(b'v')
     name = gallery.post('/paste', {'name': 'clip.mp4', 'path': str(asset)})[1]['name']
     assert gallery.post('/unsaved/rename', {'file': name, 'ext': 'md'})[0] == 409
+
+
+# ── collections ───────────────────────────────────────────────────────
+
+def _raw(gallery, method, path, payload=None, headers=None):
+    """Status, reason text and parsed body, without raising on 4xx/5xx."""
+    import urllib.error
+    import urllib.request
+    data = json.dumps(payload).encode() if payload is not None else None
+    h = {'Content-Type': 'application/json'} if data is not None else {}
+    h.update(headers or {})
+    req = urllib.request.Request(gallery.base + path, data=data, headers=h, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            body = r.read()
+            return r.status, '', (json.loads(body) if body else None), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode('utf-8', 'replace'), None, dict(e.headers)
+
+
+def _listing(gallery):
+    return gallery.get('/list')[1]
+
+
+def _coll(gallery, name):
+    return next(c for c in _listing(gallery)['collections'] if c['name'] == name)
+
+
+def _seed(gallery, *names):
+    for n in names:
+        gallery.write(n, '# ' + n + '\n')
+
+
+def _create(gallery, name, artifacts, color='blue', pattern='dots'):
+    return gallery.post('/collections/create', {'name': name, 'artifacts': artifacts,
+                                                'color': color, 'pattern': pattern})
+
+
+def test_a_collection_holds_its_artifacts_and_keeps_the_files_in_place(gallery):
+    _seed(gallery, 'a.md', 'b.md', 'c.md')
+    status, body = _create(gallery, 'Category Playbook', ['a.md', 'b.md'])
+    assert status == 200
+    c = _coll(gallery, 'Category Playbook')
+    assert c['artifacts'] == ['a.md', 'b.md']
+    assert (c['color'], c['pattern']) == ('blue', 'dots')
+    # Files never move: the folder stays flat, so Claude's paths stay valid.
+    assert sorted(p.name for p in gallery.root.glob('*.md')) == ['a.md', 'b.md', 'c.md']
+    assert gallery.get_status('/files/a.md') == 200
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    assert stored['collections'][0]['artifacts'] == ['a.md', 'b.md']
+
+
+def test_the_store_is_not_an_artifact(gallery):
+    _seed(gallery, 'a.md')
+    _create(gallery, 'One', ['a.md'])
+    assert 'collections.json' not in gallery.names()
+    assert gallery.post('/save', {'file': 'collections.json', 'content': '{}'})[0] == 403
+
+
+def test_an_artifact_lives_in_one_collection_at_a_time(gallery):
+    _seed(gallery, 'a.md', 'b.md')
+    _create(gallery, 'First', ['a.md', 'b.md'])
+    second = _create(gallery, 'Second', ['a.md'], color='red')[1]
+    assert second is not None
+    assert _coll(gallery, 'First')['artifacts'] == ['b.md']
+    assert _coll(gallery, 'Second')['artifacts'] == ['a.md']
+    cid = _coll(gallery, 'First')['id']
+    gallery.post('/collections/add', {'id': cid, 'artifacts': ['a.md']})
+    assert _coll(gallery, 'First')['artifacts'] == ['b.md', 'a.md']
+    assert _coll(gallery, 'Second')['artifacts'] == []
+
+
+@pytest.mark.parametrize('name', ['Category Playbook', 'category playbook', '  CATEGORY   playbook '])
+def test_collection_names_are_unique_ignoring_case_and_spacing(gallery, name):
+    _seed(gallery, 'a.md')
+    _create(gallery, 'Category Playbook', ['a.md'])
+    status, why, _, _ = _raw(gallery, 'POST', '/collections/create',
+                             {'name': name, 'artifacts': [], 'color': 'red', 'pattern': 'bars'})
+    assert status == 409, status
+    assert 'already exists' in why
+    assert len(_listing(gallery)['collections']) == 1
+
+
+def test_a_refusal_names_a_chinese_collection_as_written(gallery):
+    """The reason used to ride in the HTTP status line, which is latin-1 only."""
+    _create(gallery, '品类手册', [])
+    status, why, _, _ = _raw(gallery, 'POST', '/collections/create',
+                             {'name': '品类手册', 'artifacts': [], 'color': 'red', 'pattern': 'dots'})
+    assert status == 409
+    assert json.loads(why)['error'] == 'a collection named "品类手册" already exists'
+
+
+@pytest.mark.parametrize('payload,fragment', [
+    ({'name': '   ', 'artifacts': [], 'color': 'red', 'pattern': 'dots'}, 'name'),
+    ({'name': 'x' * 61, 'artifacts': [], 'color': 'red', 'pattern': 'dots'}, 'at most'),
+    ({'name': 'ok', 'artifacts': [], 'color': '#ff0000', 'pattern': 'dots'}, 'colour'),
+    ({'name': 'ok', 'artifacts': [], 'color': 'red', 'pattern': 'plaid'}, 'pattern'),
+    ({'name': 'ok', 'artifacts': ['ghost.md'], 'color': 'red', 'pattern': 'dots'}, 'no such artifact'),
+    ({'name': 'ok', 'artifacts': 'a.md', 'color': 'red', 'pattern': 'dots'}, 'list'),
+])
+def test_a_bad_create_is_refused_with_its_reason(gallery, payload, fragment):
+    _seed(gallery, 'a.md')
+    status, why, _, _ = _raw(gallery, 'POST', '/collections/create', payload)
+    assert status == 400, (status, why)
+    assert fragment in why, why
+    assert not (gallery.root / 'collections.json').exists()
+
+
+def test_an_unsaved_paste_must_be_saved_before_filing(gallery):
+    name = _paste_text(gallery, 'pasted.md', 'hello')['name']
+    status, why, _, _ = _raw(gallery, 'POST', '/collections/create',
+                             {'name': 'x', 'artifacts': [name], 'color': 'red', 'pattern': 'dots'})
+    assert status == 400 and 'save to the gallery first' in why, why
+
+
+def test_remove_rename_recolour_and_delete(gallery):
+    _seed(gallery, 'a.md', 'b.md')
+    _create(gallery, 'Old', ['a.md', 'b.md'])
+    cid = _coll(gallery, 'Old')['id']
+    gallery.post('/collections/remove', {'id': cid, 'artifacts': ['a.md']})
+    assert _coll(gallery, 'Old')['artifacts'] == ['b.md']
+    gallery.post('/collections/update', {'id': cid, 'name': 'New', 'color': 'teal', 'pattern': 'grid'})
+    c = _coll(gallery, 'New')
+    assert (c['id'], c['color'], c['pattern']) == (cid, 'teal', 'grid')
+    assert gallery.post('/collections/delete', {'id': cid})[0] == 200
+    assert _listing(gallery)['collections'] == []
+    # Deleting a collection deletes no artifact.
+    assert set(gallery.names()) == {'a.md', 'b.md'}
+    assert (gallery.root / 'a.md').is_file() and (gallery.root / 'b.md').is_file()
+
+
+def test_renaming_onto_another_collection_is_refused(gallery):
+    _seed(gallery, 'a.md')
+    _create(gallery, 'One', [])
+    _create(gallery, 'Two', [])
+    cid = _coll(gallery, 'Two')['id']
+    status, why, _, _ = _raw(gallery, 'POST', '/collections/update', {'id': cid, 'name': 'one'})
+    assert status == 409, status
+    # Renaming to itself in another case is fine.
+    assert gallery.post('/collections/update', {'id': cid, 'name': 'TWO'})[0] == 200
+
+
+def test_an_unknown_collection_or_action_is_a_404(gallery):
+    assert gallery.post('/collections/add', {'id': 'col_nope', 'artifacts': []})[0] == 404
+    _create(gallery, 'One', [])
+    cid = _coll(gallery, 'One')['id']
+    assert gallery.post('/collections/explode', {'id': cid})[0] == 404
+
+
+def test_deleting_an_artifact_takes_it_out_of_its_collection(gallery):
+    _seed(gallery, 'a.md', 'b.md')
+    _create(gallery, 'One', ['a.md', 'b.md'])
+    gallery.post('/delete', {'files': ['a.md']})
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    assert stored['collections'][0]['artifacts'] == ['b.md']
+
+
+def test_a_file_removed_outside_the_gallery_drops_out_of_view(gallery):
+    _seed(gallery, 'a.md', 'b.md')
+    _create(gallery, 'One', ['a.md', 'b.md'])
+    (gallery.root / 'a.md').unlink()
+    assert _coll(gallery, 'One')['artifacts'] == ['b.md']
+    # ...and comes back if it reappears under the same name.
+    (gallery.root / 'a.md').write_text('back', encoding='utf-8')
+    assert _coll(gallery, 'One')['artifacts'] == ['a.md', 'b.md']
+
+
+def test_a_linked_artifact_can_be_filed(gallery, tmp_path):
+    asset = tmp_path / 'project' / 'bed.wav'
+    asset.parent.mkdir()
+    asset.write_bytes(b'RIFF')
+    (gallery.root / 'music.wav.link').write_text(str(asset) + '\n', encoding='utf-8')
+    assert _create(gallery, 'Sound', ['music.wav'])[0] == 200
+    assert _coll(gallery, 'Sound')['artifacts'] == ['music.wav']
+
+
+def test_new_artifacts_land_on_the_homepage(gallery):
+    _seed(gallery, 'a.md')
+    _create(gallery, 'One', ['a.md'])
+    gallery.write('fresh.md', '# new\n')
+    assert _coll(gallery, 'One')['artifacts'] == ['a.md']
+
+
+def test_notify_files_into_a_named_collection_creating_it(gallery):
+    (gallery.root / 'deck.html').write_text('<p>x</p>', encoding='utf-8')
+    assert gallery.get_status('/notify?file=deck.html&collection=Category%20Playbook') == 200
+    c = _coll(gallery, 'Category Playbook')
+    assert c['artifacts'] == ['deck.html']
+    assert c['color'] in ('red', 'orange', 'amber', 'green', 'teal', 'blue', 'violet', 'slate')
+    # A second notify naming it in another case reuses the same collection.
+    (gallery.root / 'brief.md').write_text('# b', encoding='utf-8')
+    gallery.get('/notify?file=brief.md&collection=category%20playbook')
+    assert [x['name'] for x in _listing(gallery)['collections']] == ['Category Playbook']
+    assert _coll(gallery, 'Category Playbook')['artifacts'] == ['deck.html', 'brief.md']
+
+
+def test_notify_picks_a_combination_not_already_used(gallery):
+    for i in range(6):
+        (gallery.root / f'f{i}.md').write_text('x', encoding='utf-8')
+        gallery.get(f'/notify?file=f{i}.md&collection=C{i}')
+    combos = [(c['color'], c['pattern']) for c in _listing(gallery)['collections']]
+    assert len(combos) == 6 and len(set(combos)) == 6, combos
+
+
+def test_notify_into_a_collection_for_a_missing_file_says_so(gallery):
+    status, why, _, _ = _raw(gallery, 'GET', '/notify?file=ghost.md&collection=X')
+    assert status == 400 and 'no such artifact' in why, (status, why)
+
+
+def test_reads_during_writes_never_fail(gallery):
+    """
+    The page re-reads /list on every collections event, i.e. while the next
+    write is happening. Reading outside the writers' lock failed on Windows:
+    os.replace onto an open file is refused, and a read can land mid-replace.
+    """
+    import threading
+    _seed(gallery, 'a.md')
+    stop = threading.Event()
+    bad = []
+
+    def reader():
+        while not stop.is_set():
+            status, why, body, _ = _raw(gallery, 'GET', '/list')
+            if status != 200 or 'collections_error' in (body or {}):
+                bad.append(('read', status, why, (body or {}).get('collections_error')))
+
+    readers = [threading.Thread(target=reader) for _ in range(6)]
+    for t in readers:
+        t.start()
+    try:
+        for i in range(200):
+            status, why, _, _ = _raw(gallery, 'POST', '/collections/create',
+                                     {'name': f'c{i}', 'artifacts': [], 'color': 'red', 'pattern': 'dots'})
+            if status != 200:
+                bad.append(('write', status, why))
+    finally:
+        stop.set()
+        for t in readers:
+            t.join()
+    assert not bad, bad[:3]
+    assert len(_listing(gallery)['collections']) == 200
+
+
+def test_every_store_read_holds_the_writers_lock(gallery, monkeypatch):
+    """
+    The deterministic form of the race above: the write retry would hide an
+    unlocked read, so check the invariant itself on every path that reads.
+    """
+    mod = gallery.mod
+    real = mod.load_collections
+    held = []
+
+    def spy():
+        held.append(mod._collections_lock.locked())
+        return real()
+
+    monkeypatch.setattr(mod, 'load_collections', spy)
+    _seed(gallery, 'a.md', 'b.md')
+    _create(gallery, 'One', ['a.md'])
+    _listing(gallery)
+    gallery.get('/notify?file=b.md&collection=Two')
+    gallery.post('/delete', {'files': ['a.md']})
+    assert len(held) >= 5, held
+    assert all(held), held
+
+
+def test_listing_never_opens_the_files_it_lists(gallery, monkeypatch):
+    """
+    On Windows, Path.stat() opens the file, and while it is open os.replace
+    onto it is refused: 81 of 400 writes failed beside a stat-ing lister.
+    The listing must read dates from the directory entries instead.
+    """
+    import os as _os
+    _seed(gallery, 'a.md', 'b.md')
+    _create(gallery, 'One', ['a.md'])
+    root = gallery.root.resolve()
+    opened = []
+    real_stat = _os.stat
+
+    def spy(path, *a, **k):
+        p = Path(path)
+        if p.parent.resolve() == root and not p.name.endswith('.link'):
+            opened.append(p.name)
+        return real_stat(path, *a, **k)
+
+    monkeypatch.setattr(_os, 'stat', spy)
+    names = [f['name'] for f in gallery.mod.ordered_files()]
+    monkeypatch.setattr(_os, 'stat', real_stat)
+    assert sorted(names) == ['a.md', 'b.md']
+    assert opened == [], opened
+
+
+def test_a_briefly_refused_write_is_retried_and_logged(gallery, monkeypatch, caplog):
+    mod = gallery.mod
+    real = mod.os.replace
+    refusals = {'left': 2}
+
+    def flaky(src, dst):
+        if refusals['left']:
+            refusals['left'] -= 1
+            raise PermissionError(13, 'Access is denied')
+        return real(src, dst)
+
+    monkeypatch.setattr(mod.os, 'replace', flaky)
+    target = gallery.root / 'x.json'
+    mod.atomic_write_text(target, '{"ok": 1}')
+    assert target.read_text(encoding='utf-8') == '{"ok": 1}'
+    assert sum('refused' in r.getMessage() for r in caplog.records) == 2
+
+
+def test_a_lasting_refusal_fails_loudly_and_keeps_the_old_file(gallery, monkeypatch):
+    mod = gallery.mod
+    target = gallery.root / 'x.json'
+    target.write_text('old', encoding='utf-8')
+
+    def never(src, dst):
+        raise PermissionError(13, 'Access is denied')
+
+    monkeypatch.setattr(mod.os, 'replace', never)
+    monkeypatch.setattr(mod.time, 'sleep', lambda s: None)
+    with pytest.raises(PermissionError):
+        mod.atomic_write_text(target, 'new')
+    assert target.read_text(encoding='utf-8') == 'old'
+    assert not (gallery.root / 'x.json.tmp').exists()
+
+
+def test_an_unreadable_store_is_reported_and_never_overwritten(gallery):
+    _seed(gallery, 'a.md')
+    broken = '{"collections": [ this is not json'
+    (gallery.root / 'collections.json').write_text(broken, encoding='utf-8')
+    listing = _listing(gallery)
+    assert listing['collections'] == []
+    assert 'unreadable' in listing['collections_error']
+    assert [f['name'] for f in listing['files']] == ['a.md'], 'artifacts must still list'
+    status, why, _, _ = _raw(gallery, 'POST', '/collections/create',
+                             {'name': 'x', 'artifacts': [], 'color': 'red', 'pattern': 'dots'})
+    assert status == 500 and 'unreadable' in why
+    gallery.post('/delete', {'files': ['a.md']})
+    assert (gallery.root / 'collections.json').read_text(encoding='utf-8') == broken
+
+
+# ── who may ask ───────────────────────────────────────────────────────
+
+def test_a_post_from_another_website_changes_nothing(gallery):
+    """Any page open in the browser can send this server a request."""
+    _seed(gallery, 'keep.md')
+    for origin in ('https://evil.example', 'null', 'http://127.0.0.1:1'):
+        status, _, _, _ = _raw(gallery, 'POST', '/delete', {'files': ['keep.md']},
+                               headers={'Origin': origin})
+        assert status == 403, origin
+    assert (gallery.root / 'keep.md').is_file()
+
+
+def test_a_form_style_cross_site_post_is_refused(gallery):
+    """text/plain needs no preflight, so the Origin check is what stops it."""
+    _seed(gallery, 'keep.md')
+    status, _, _, _ = _raw(gallery, 'POST', '/delete', None,
+                           headers={'Origin': 'https://evil.example',
+                                    'Content-Type': 'text/plain'})
+    assert status == 403
+    assert (gallery.root / 'keep.md').is_file()
+
+
+def test_the_gallery_page_itself_may_post(gallery):
+    _seed(gallery, 'gone.md')
+    for host in ('127.0.0.1', 'localhost'):
+        origin = gallery.base.replace('127.0.0.1', host)
+        _seed(gallery, 'gone.md')
+        status, _, _, _ = _raw(gallery, 'POST', '/delete', {'files': ['gone.md']},
+                               headers={'Origin': origin})
+        assert status == 200, origin
+        assert not (gallery.root / 'gone.md').exists()
+
+
+def test_a_rebound_hostname_is_refused(gallery):
+    """DNS rebinding: evil.example resolves to 127.0.0.1 and keeps its own Host."""
+    import socket as _socket
+    from urllib.parse import urlparse
+    _seed(gallery, 'secret.md')
+    u = urlparse(gallery.base)
+    for host in (b'evil.example:' + str(u.port).encode(), b'127.0.0.1:1'):
+        with _socket.create_connection((u.hostname, u.port), timeout=5) as sk:
+            sk.sendall(b'GET /list HTTP/1.1\r\nHost: ' + host + b'\r\nConnection: close\r\n\r\n')
+            raw = b''
+            while chunk := sk.recv(65536):
+                raw += chunk
+        assert raw.split(b'\r\n', 1)[0].split()[1] == b'403', (host, raw[:80])
+        assert b'secret.md' not in raw
+
+
+def test_notify_from_a_web_page_is_refused(gallery):
+    (gallery.root / 'x.md').write_text('x', encoding='utf-8')
+    status, _, _, _ = _raw(gallery, 'GET', '/notify?file=x.md&collection=Y',
+                           headers={'Sec-Fetch-Site': 'cross-site'})
+    assert status == 403
+    assert _listing(gallery)['collections'] == []
+
+
+def test_replies_are_not_readable_by_other_websites(gallery):
+    for path in ('/list', '/version'):
+        _, _, _, headers = _raw(gallery, 'GET', path)
+        assert 'Access-Control-Allow-Origin' not in headers, path

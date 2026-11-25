@@ -92,6 +92,7 @@ def gallery(tmp_path, monkeypatch):
     mod.HISTORY_DIR = root / '.history'
     mod.UNSAVED_DIR = root / '.unsaved'
     mod.INDEX_FILE = root / 'artifacts.json'
+    mod.COLLECTIONS_FILE = root / 'collections.json'
     mod.LOG_FILE = root / 'gallery.log'
     mod.GALLERY_HTML = SRC / 'gallery.html'
     mod.setup_logging()

@@ -10,7 +10,7 @@ Every write goes through atomic_write_* so a crash mid-write cannot truncate
 either an artifact or the index. Saves snapshot the previous content into
 .history/ so an edit can be undone.
 """
-import http.server, json, logging, logging.handlers, os, queue, shutil, sys, threading, time, traceback, urllib.parse
+import http.server, json, logging, logging.handlers, os, queue, random, secrets, shutil, sys, threading, time, traceback, urllib.parse
 from pathlib import Path
 
 PORT = 7477
@@ -97,9 +97,22 @@ HISTORY_DIR = ROOT / '.history'
 # that resolves it share one word.
 UNSAVED_DIR = ROOT / '.unsaved'
 LOG_FILE = ROOT.parent / 'gallery.log' if getattr(sys, 'frozen', False) else ROOT / 'gallery.log'
-SKIP = {'gallery.html', 'server.py', 'artifacts.json', '.thumbnails', '.card-thumbnails', '.history',
-        '.unsaved', 'gallery.log', 'gallery.log.1'}
+SKIP = {'gallery.html', 'server.py', 'artifacts.json', 'collections.json', '.thumbnails',
+        '.card-thumbnails', '.history', '.unsaved', 'gallery.log', 'gallery.log.1'}
 INDEX_FILE = ROOT / 'artifacts.json'
+# Collections are a view over the flat folder: files never move on disk, so
+# where Claude saves, /notify, and every path other tools hold stay valid.
+# Kept apart from artifacts.json so older gallery versions read that unchanged.
+COLLECTIONS_FILE = ROOT / 'collections.json'
+# Stored as names, not colours, so the palette can be retuned without
+# rewriting anyone's file. gallery.html draws each one.
+COLLECTION_COLORS = ('red', 'orange', 'amber', 'green', 'teal', 'blue', 'violet', 'slate')
+COLLECTION_PATTERNS = ('dots', 'spots', 'checks', 'grid', 'stripes', 'bars')
+COLLECTION_NAME_MAX = 60
+# The only Host values this server answers to. It binds loopback, so any other
+# name reaching it is a DNS-rebinding page posing as the gallery.
+LOCAL_HOSTS = ('127.0.0.1', 'localhost')
+COLLECTIONS_EVENT = '__collections__'
 HISTORY_KEEP = 10            # snapshots retained per file
 UPDATE_CACHE_TTL = 6 * 3600  # don't re-ask GitHub more often than this
 RELEASES_API = 'https://api.github.com/repos/HyperBioGhost/claude-gallery/releases/latest'
@@ -108,6 +121,7 @@ RELEASES_PAGE = 'https://github.com/HyperBioGhost/claude-gallery/releases/latest
 _clients: list[queue.Queue] = []
 _clients_lock = threading.Lock()
 _index_lock = threading.Lock()
+_collections_lock = threading.Lock()
 _update_lock = threading.Lock()
 _update_cache: dict = {}     # {'checked': epoch, 'result': {...}}
 
@@ -136,11 +150,26 @@ def setup_logging() -> None:
 # swallows the parse error); for an artifact it destroys the user's work.
 # Writing to a sibling temp file and renaming makes the swap all-or-nothing.
 
+REPLACE_TRIES = 6            # ~0.5 s in all, then the error goes to the caller
+
+
 def _atomic(path: Path, write) -> None:
     tmp = path.parent / (path.name + '.tmp')
     try:
         write(tmp)
-        os.replace(tmp, path)   # same directory, so this is atomic
+        # Same directory, so the swap is atomic. On Windows it is refused while
+        # anything holds the target open -- antivirus or the search indexer
+        # looking at a file just written, typically for a few milliseconds.
+        # Retry briefly, log each refusal, and fail loudly if it persists.
+        for attempt in range(1, REPLACE_TRIES + 1):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError as e:
+                if attempt == REPLACE_TRIES:
+                    raise
+                log.warning('replace of %s refused (%s); retry %d', path.name, e, attempt)
+                time.sleep(0.03 * attempt)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
@@ -280,7 +309,9 @@ def link_pointers() -> dict:
     """display name -> resolved link info, for every pointer in ROOT."""
     out = {}
     for f in ROOT.iterdir():
-        if f.is_file() and f.name.endswith(LINK_SUFFIX):
+        # Name first: stat-ing a file on Windows opens it, which can make a
+        # concurrent atomic write onto that file fail (see _atomic).
+        if f.name.endswith(LINK_SUFFIX) and f.is_file():
             info = read_link(f)
             if info['name']:
                 out[info['name']] = info
@@ -349,14 +380,19 @@ def ordered_files() -> list[dict]:
     with _index_lock:
         order = load_index()
 
-    on_disk = {
-        f.name: int(f.stat().st_mtime * 1000)
-        for f in ROOT.iterdir()
-        # .tmp is an in-flight atomic write, not an artifact; .link is the
-        # pointer, listed below under the name of the asset it points at.
-        if f.is_file() and f.name not in SKIP and not f.name.endswith('.tmp')
-        and not f.name.endswith(LINK_SUFFIX)
-    }
+    # scandir, not iterdir + stat: on Windows a DirEntry carries the size and
+    # dates from the directory listing itself, while Path.stat() opens the
+    # file -- and a file held open, even for that instant, refuses the
+    # os.replace that every save and every index or collections write uses.
+    with os.scandir(ROOT) as entries:
+        on_disk = {
+            e.name: int(e.stat().st_mtime * 1000)
+            for e in entries
+            # .tmp is an in-flight atomic write, not an artifact; .link is the
+            # pointer, listed below under the name of the asset it points at.
+            if e.name not in SKIP and not e.name.endswith('.tmp')
+            and not e.name.endswith(LINK_SUFFIX) and e.is_file()
+        }
 
     # Linked assets. The date is the target's, so grouping by date describes
     # the asset rather than when the pointer was written.
@@ -552,6 +588,206 @@ def discard_unsaved(names) -> list:
     return gone
 
 
+# ── Collections ────────────────────────────────────────────────────────
+# collections.json: {"collections": [{"id", "name", "color", "pattern",
+# "created", "artifacts": [names]}]}. An artifact belongs to at most one
+# collection; adding it to another moves it.
+
+class CollectionError(Exception):
+    """A request the store refuses, with the HTTP status to answer it with."""
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+
+
+def load_collections() -> list[dict]:
+    """
+    Read the store. A missing file is no collections; an unreadable one raises,
+    because answering "none" would let the next write erase every collection.
+    """
+    try:
+        text = COLLECTIONS_FILE.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return []
+    try:
+        data = json.loads(text)
+        items = data['collections']
+        if not isinstance(items, list):
+            raise ValueError('"collections" is not a list')
+    except Exception as e:
+        raise CollectionError(500, f'{COLLECTIONS_FILE.name} is unreadable ({e}); '
+                                   'fix or move it aside, then reload') from e
+    out = []
+    for c in items:
+        if not isinstance(c, dict) or not c.get('id') or not c.get('name'):
+            continue
+        out.append({
+            'id': str(c['id']),
+            'name': str(c['name']),
+            'color': c.get('color') if c.get('color') in COLLECTION_COLORS else COLLECTION_COLORS[-1],
+            'pattern': c.get('pattern') if c.get('pattern') in COLLECTION_PATTERNS else COLLECTION_PATTERNS[0],
+            'created': int(c.get('created') or 0),
+            'artifacts': [str(n) for n in c.get('artifacts', []) if isinstance(n, str)],
+        })
+    return out
+
+
+def save_collections(items: list[dict]) -> None:
+    atomic_write_text(COLLECTIONS_FILE,
+                      json.dumps({'collections': items}, indent=2, ensure_ascii=False))
+
+
+def clean_collection_name(raw) -> str:
+    name = ' '.join(str(raw or '').split())
+    if not name:
+        raise CollectionError(400, 'give the collection a name')
+    if len(name) > COLLECTION_NAME_MAX:
+        raise CollectionError(400, f'a collection name is at most {COLLECTION_NAME_MAX} characters')
+    return name
+
+
+def find_collection(items: list[dict], *, cid=None, name=None):
+    for c in items:
+        if cid is not None and c['id'] == cid:
+            return c
+        if name is not None and c['name'].casefold() == name.casefold():
+            return c
+    return None
+
+
+def registered_names() -> set:
+    """Artifacts a collection may hold: in the folder or linked, never unsaved."""
+    return {f['name'] for f in ordered_files() if not f.get('unsaved')}
+
+
+def check_members(names) -> list[str]:
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        raise CollectionError(400, '"artifacts" must be a list of names')
+    pending = unsaved_names()
+    staged = [n for n in names if n in pending]
+    if staged:
+        raise CollectionError(400, 'save to the gallery first: ' + ', '.join(staged))
+    known = registered_names()
+    missing = [n for n in names if n not in known]
+    if missing:
+        raise CollectionError(400, 'no such artifact: ' + ', '.join(missing))
+    return list(dict.fromkeys(names))
+
+
+def file_into(items: list[dict], target: dict, names: list[str]) -> None:
+    """Put names in target, taking them out of any other collection."""
+    moving = set(names)
+    for c in items:
+        if c is not target:
+            c['artifacts'] = [n for n in c['artifacts'] if n not in moving]
+    target['artifacts'] += [n for n in names if n not in target['artifacts']]
+
+
+def new_collection(items: list[dict], name: str, color=None, pattern=None) -> dict:
+    if find_collection(items, name=name):
+        raise CollectionError(409, f'a collection named "{name}" already exists')
+    if color is None and pattern is None:
+        # Asked for by name alone (from /notify): pick a combination nobody
+        # uses yet, so the new pile is told apart from the others at a glance.
+        used = {(c['color'], c['pattern']) for c in items}
+        free = [(k, p) for k in COLLECTION_COLORS for p in COLLECTION_PATTERNS
+                if (k, p) not in used]
+        color, pattern = random.choice(free or [(k, p) for k in COLLECTION_COLORS
+                                                for p in COLLECTION_PATTERNS])
+    if color not in COLLECTION_COLORS:
+        raise CollectionError(400, f'unknown colour "{color}"')
+    if pattern not in COLLECTION_PATTERNS:
+        raise CollectionError(400, f'unknown pattern "{pattern}"')
+    c = {'id': 'col_' + secrets.token_hex(6), 'name': name, 'color': color,
+         'pattern': pattern, 'created': int(time.time() * 1000), 'artifacts': []}
+    items.append(c)
+    return c
+
+
+def change_collections(action: str, body: dict) -> list[dict]:
+    """Apply one change under the lock and write it. Returns the new store."""
+    with _collections_lock:
+        items = load_collections()
+        if action == 'create':
+            names = check_members(body.get('artifacts', []))
+            c = new_collection(items, clean_collection_name(body.get('name')),
+                               body.get('color'), body.get('pattern'))
+            file_into(items, c, names)
+        else:
+            c = find_collection(items, cid=body.get('id'))
+            if c is None:
+                raise CollectionError(404, 'no such collection')
+            if action == 'add':
+                file_into(items, c, check_members(body.get('artifacts', [])))
+            elif action == 'remove':
+                out = set(body.get('artifacts', []))
+                c['artifacts'] = [n for n in c['artifacts'] if n not in out]
+            elif action == 'update':
+                if 'name' in body:
+                    name = clean_collection_name(body['name'])
+                    clash = find_collection(items, name=name)
+                    if clash is not None and clash is not c:
+                        raise CollectionError(409, f'a collection named "{name}" already exists')
+                    c['name'] = name
+                if 'color' in body:
+                    if body['color'] not in COLLECTION_COLORS:
+                        raise CollectionError(400, f'unknown colour "{body["color"]}"')
+                    c['color'] = body['color']
+                if 'pattern' in body:
+                    if body['pattern'] not in COLLECTION_PATTERNS:
+                        raise CollectionError(400, f'unknown pattern "{body["pattern"]}"')
+                    c['pattern'] = body['pattern']
+            elif action == 'delete':
+                # The collection goes; its artifacts go back to the homepage.
+                items.remove(c)
+            else:
+                raise CollectionError(404, 'unknown collection action')
+        save_collections(items)
+        log.info('collections: %s %s', action, body.get('name') or body.get('id'))
+    announce(COLLECTIONS_EVENT)
+    return items
+
+
+def forget_members(names) -> None:
+    """Deleted artifacts leave their collection with them."""
+    gone = set(names)
+    if not gone:
+        return
+    with _collections_lock:
+        try:
+            items = load_collections()
+        except CollectionError as e:
+            log.error('could not drop deleted artifacts from collections: %s', e)
+            return
+        if any(gone & set(c['artifacts']) for c in items):
+            for c in items:
+                c['artifacts'] = [n for n in c['artifacts'] if n not in gone]
+            save_collections(items)
+            announce(COLLECTIONS_EVENT)
+
+
+def collections_view(present: set) -> list[dict]:
+    """
+    The store as the page shows it: only artifacts that still exist. A file
+    removed outside the gallery drops out of view without a write, and comes
+    back if it reappears under the same name.
+    """
+    # Read under the writers' lock: on Windows, os.replace onto a file another
+    # thread has open is refused, and a read can land mid-replace. The page
+    # re-reads /list on every collections event, exactly when writes happen.
+    with _collections_lock:
+        items = load_collections()
+    for c in items:
+        c['artifacts'] = [n for n in c['artifacts'] if n in present]
+    return items
+
+
+def announce(event: str) -> None:
+    with _clients_lock:
+        for q in _clients:
+            q.put(event)
+
+
 # ── Update check ─────────────────────────────────────────────
 # The gallery asks once per page load. This is the only outbound request the
 # app ever makes; it sends nothing but the request itself, and any failure is
@@ -600,11 +836,60 @@ def check_for_update() -> dict:
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
 
+    # ── Who may ask ────────────────────────────────────────────────────
+    # The server binds loopback, but every page open in the browser can still
+    # send it requests. Three checks keep those out:
+    #   Host    -- a DNS-rebinding page arrives with its own name as the Host.
+    #   Origin  -- a browser names the page behind every POST; only the gallery
+    #              itself may change anything. curl and scripts send no Origin.
+    #   Sec-Fetch-Site on /notify -- a GET, so a cross-site <img> could fire it.
+    # Artifact files stay readable from anywhere the Host check allows: a
+    # sandboxed preview has an opaque origin and loads its siblings by GET.
+
+    def _host_ok(self) -> bool:
+        host = (self.headers.get('Host') or '').strip().lower()
+        name, _, port = host.rpartition(':') if ':' in host else (host, '', '')
+        if not name:
+            name, port = port, ''
+        if name not in LOCAL_HOSTS:
+            return False
+        return port in ('', str(self.server.server_address[1]))
+
+    def _origin_ok(self) -> bool:
+        origin = self.headers.get('Origin')
+        if origin is None:
+            return True
+        port = self.server.server_address[1]
+        return origin.lower() in {f'http://{h}:{port}' for h in LOCAL_HOSTS}
+
+    def _refuse(self, why: str) -> None:
+        log.info('refused %s %s: %s (Host=%s Origin=%s)', self.command, self.path, why,
+                 self.headers.get('Host'), self.headers.get('Origin'))
+        self.send_error(403, why)
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = urllib.parse.unquote(parsed.path)
+        if not self._host_ok():
+            self._refuse('not addressed to this gallery'); return
+        if not self._origin_ok():
+            self._refuse('only the gallery page can change artifacts'); return
 
-        if path == '/save':
+        if path.startswith('/collections/'):
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(length)) if length else {}
+                if not isinstance(body, dict):
+                    raise CollectionError(400, 'expected a JSON object')
+                change_collections(path[len('/collections/'):], body)
+                self._json({'collections': collections_view(registered_names())})
+            except CollectionError as e:
+                self._fail(e.status, str(e))
+            except Exception as e:
+                log.error('collections change failed\n%s', traceback.format_exc())
+                self.send_error(500, str(e))
+
+        elif path == '/save':
             try:
                 length = int(self.headers.get('Content-Length', 0))
                 body = json.loads(self.rfile.read(length))
@@ -683,6 +968,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     order = load_index()
                     order = [n for n in order if n not in deleted]
                     save_index(order)
+                forget_members(deleted)
                 if deleted:
                     log.info('deleted %s', ', '.join(deleted))
                 self._json({'deleted': deleted})
@@ -942,24 +1228,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = urllib.parse.unquote(parsed.path)
         qs = urllib.parse.parse_qs(parsed.query)
+        if not self._host_ok():
+            self._refuse('not addressed to this gallery'); return
 
         if path in ('/', '/gallery.html'):
             self.serve_file(GALLERY_HTML, 'text/html')
 
         elif path == '/notify':
+            if self.headers.get('Sec-Fetch-Site', 'none') not in ('none', 'same-origin'):
+                self._refuse('notify is for Claude, not for web pages'); return
             fname = qs.get('file', [None])[0]
+            wanted = qs.get('collection', [None])[0]
             if fname:
                 register_file(fname)
                 with _clients_lock:
                     for q in _clients:
                         q.put(fname)
+            # New artifacts land on the homepage. Naming a collection files it
+            # there, creating the collection if it does not exist yet.
+            if fname and wanted is not None:
+                try:
+                    name = clean_collection_name(wanted)
+                    with _collections_lock:
+                        items = load_collections()
+                        c = find_collection(items, name=name) or new_collection(items, name)
+                        file_into(items, c, check_members([fname]))
+                        save_collections(items)
+                    log.info('notify filed %s into %s', fname, c['name'])
+                    announce(COLLECTIONS_EVENT)
+                except CollectionError as e:
+                    self._fail(e.status, str(e)); return
             self._empty_ok()
 
         elif path == '/events':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
             self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             q: queue.Queue = queue.Queue()
             with _clients_lock:
@@ -969,6 +1273,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     fname = q.get(timeout=25)
                     if fname == '__ping__':
                         self.wfile.write(b': ping\n\n')
+                    elif fname == COLLECTIONS_EVENT:
+                        self.wfile.write(b'data: {"collections": true}\n\n')
                     else:
                         msg = f'data: {json.dumps({"file": fname})}\n\n'
                         self.wfile.write(msg.encode())
@@ -981,7 +1287,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         _clients.remove(q)
 
         elif path == '/list':
-            self._json({'files': ordered_files()})
+            listed = ordered_files()
+            reply = {'files': listed}
+            try:
+                reply['collections'] = collections_view(
+                    {f['name'] for f in listed if not f.get('unsaved')})
+            except CollectionError as e:
+                # Shown on the page; the artifacts themselves still list.
+                reply['collections'] = []
+                reply['collections_error'] = str(e)
+            self._json(reply)
 
         elif path == '/version':
             self._json({'version': DISPLAY_VERSION, 'release': IS_RELEASE})
@@ -1024,6 +1339,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Some players probe with HEAD before requesting ranges."""
         parsed = urllib.parse.urlparse(self.path)
         path = urllib.parse.unquote(parsed.path)
+        if not self._host_ok():
+            self._refuse('not addressed to this gallery'); return
         if path.startswith('/files/'):
             self.serve_artifact(path[7:], head_only=True)
         elif path in ('/', '/gallery.html'):
@@ -1036,12 +1353,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Length', '0')
         self.end_headers()
 
+    def _fail(self, status: int, message: str):
+        # send_error puts the message in the status line, which must be
+        # latin-1: a Chinese collection name there crashed the reply. JSON
+        # carries any name, and the page shows it as written.
+        self._json({'error': message}, status)
+
     def _json(self, obj, status=200):
         body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', len(body))
-        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(body)
 

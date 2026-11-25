@@ -16,6 +16,7 @@ When you generate any viewable output - HTML, SVG, images, charts, code, data fi
    - **Mac**: `~/ClaudeGallery/artifacts/<filename>`
    - **Windows**: `~/Documents/ClaudeGallery/artifacts/<filename>`
 2. Immediately after saving, run: `curl -s "http://localhost:7477/notify?file=<filename>"` (on Windows, use `curl.exe`)
+   - Only when the user asks for it to go in a collection, add `&collection=<name>` (URL-encoded, e.g. `Category%20Playbook`). The collection is created if it does not exist. Otherwise leave it out: new artifacts go on the gallery homepage.
 3. Tell the user: "Sent to Claude Gallery."
 
 Gallery types: .html, .htm, .svg, .png, .jpg, .gif, .webp, .csv, .json, .py, .js, .ts, .css, .txt, .md

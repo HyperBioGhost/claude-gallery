@@ -9,6 +9,7 @@ browser — it depends on blob URLs, iframe sandboxing and a debounce timer.
 Skipped (not failed) when Playwright is unavailable, so the suite still runs on
 a machine without a browser. CI installs chromium, so these do run there.
 """
+import json
 import os
 import pathlib
 
@@ -2017,6 +2018,391 @@ def test_the_unsaved_toolbar_fits_on_one_line_at_1024(gallery, page):
     g = page.evaluate(TOOLBAR_GEOMETRY)
     assert g['overlaps'] == 0 and g['offEdge'] == 0, g
     assert g['height'] <= 56, g
+
+
+# ── collections ───────────────────────────────────────────────────────
+
+def make_collection(gallery, name, artifacts, color='blue', pattern='dots'):
+    status, body = gallery.post('/collections/create', {
+        'name': name, 'artifacts': artifacts, 'color': color, 'pattern': pattern})
+    assert status == 200, status
+    return next(c for c in body['collections'] if c['name'] == name)
+
+
+def seed_collection(gallery, page):
+    for n in ('deck.md', 'claims.md', 'loose.md', 'other.json'):
+        gallery.write(n, '# ' + n + '\n')
+    c = make_collection(gallery, 'Category Playbook', ['deck.md', 'claims.md'])
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    return c
+
+
+def shown_cards(page):
+    """Names on the cards a person can see, collections included."""
+    return page.evaluate("""() => [...document.querySelectorAll('#grid .card')]
+        .filter(c => c.offsetParent !== null)
+        .sort((a, b) => (+a.style.order || 0) - (+b.style.order || 0))
+        .map(c => c.querySelector('.card-name').textContent)""")
+
+
+def select(page, *names):
+    if not page.locator('body.select-mode').count():
+        page.click('#select-mode-btn')
+    for n in names:
+        page.check(f'.card:has-text("{n}") .select-check')
+
+
+def test_select_offers_collection_actions(gallery, page):
+    gallery.write('a.md', 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    assert page.locator('#select-mode-btn').inner_text() == 'Select…'
+    assert not page.locator('#add-to-collection-btn').is_visible()
+    page.click('#select-mode-btn')
+    visible = [b for b in ('#select-mode-btn', '#add-to-collection-btn',
+                           '#remove-from-collection-btn', '#delete-selected-btn')
+               if page.locator(b).is_visible()]
+    assert visible == ['#select-mode-btn', '#add-to-collection-btn', '#delete-selected-btn']
+    assert page.locator('#select-mode-btn').inner_text() == 'Cancel'
+
+
+def test_creating_a_collection_files_the_artifacts_under_one_card(gallery, page):
+    for n in ('deck.md', 'claims.md', 'loose.md'):
+        gallery.write(n, '# ' + n)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    select(page, 'deck.md', 'claims.md')
+    page.click('#add-to-collection-btn')
+    page.wait_for_selector('#collection-dialog.visible')
+    assert page.locator('#cd-title').inner_text() == 'Add 2 artifacts to a collection'
+    page.fill('#cd-name', 'Category Playbook')
+    page.check('#cd-colors input[value="teal"]')
+    page.check('#cd-patterns input[value="stripes"]')
+    page.click('#cd-submit')
+    page.wait_for_selector('.collection-card:has-text("Category Playbook")')
+    assert not page.locator('#collection-dialog.visible').count()
+    assert not page.locator('body.select-mode').count()
+    cover = page.locator('.collection-card .cover')
+    assert (cover.get_attribute('data-color'), cover.get_attribute('data-pattern')) == ('teal', 'stripes')
+    assert page.locator('.collection-card .collection-count').inner_text() == '2 artifacts'
+    # Filed artifacts leave the homepage; the loose one stays.
+    assert shown_cards(page) == ['Category Playbook', 'loose.md']
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    assert sorted(stored['collections'][0]['artifacts']) == ['claims.md', 'deck.md']
+
+
+def test_the_cover_draws_the_chosen_colour_and_pattern(gallery, page):
+    """Every colour x pattern renders as a real image in a distinct hue."""
+    gallery.write('a.md', 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    got = page.evaluate("""() => {
+        const out = {};
+        for (const [k] of COLLECTION_COLORS) for (const [p] of COLLECTION_PATTERNS) {
+            const el = document.createElement('div');
+            el.className = 'cover'; el.dataset.color = k; el.dataset.pattern = p;
+            document.body.appendChild(el);
+            const cs = getComputedStyle(el);
+            out[k + '/' + p] = { img: cs.backgroundImage, c: cs.getPropertyValue('--c').trim() };
+            el.remove();
+        }
+        return out;
+    }""")
+    assert len(got) == 48
+    assert all(v['img'] not in ('', 'none') for v in got.values()), got
+    hues = {k.split('/')[0]: v['c'] for k, v in got.items()}
+    assert len(set(hues.values())) == 8, hues
+    assert len({v['img'] for k, v in got.items() if k.startswith('blue/')}) == 6
+
+
+def test_opening_a_collection_shows_only_its_artifacts(gallery, page):
+    seed_collection(gallery, page)
+    page.click('.collection-card:has-text("Category Playbook")')
+    page.wait_for_selector('#collection-bar.visible')
+    assert page.locator('#collection-title').inner_text() == 'Category Playbook'
+    assert sorted(shown_cards(page)) == ['claims.md', 'deck.md']
+    assert page.locator('#file-count').inner_text() == '2 artifacts in this collection'
+    chips = page.locator('.type-chip').all_inner_texts()
+    assert chips == ['All2', '.md2'], chips
+    page.click('.crumb-home')
+    page.wait_for_selector('#collection-bar', state='hidden')
+    assert shown_cards(page) == ['Category Playbook', 'other.json', 'loose.md']
+
+
+def test_back_from_an_artifact_returns_to_its_collection(gallery, page):
+    seed_collection(gallery, page)
+    page.click('.collection-card:has-text("Category Playbook")')
+    page.click('.card:has-text("deck.md")')
+    page.wait_for_selector('#detail-view.visible')
+    page.click('.back-btn')
+    page.wait_for_selector('#collection-bar.visible')
+    assert sorted(shown_cards(page)) == ['claims.md', 'deck.md']
+
+
+def test_escape_leaves_a_collection(gallery, page):
+    seed_collection(gallery, page)
+    page.click('.collection-card:has-text("Category Playbook")')
+    page.wait_for_selector('#collection-bar.visible')
+    page.keyboard.press('Escape')
+    page.wait_for_selector('#collection-bar', state='hidden')
+
+
+def test_a_collection_card_opens_from_the_keyboard(gallery, page):
+    seed_collection(gallery, page)
+    page.focus('.collection-card')
+    page.keyboard.press('Enter')
+    page.wait_for_selector('#collection-bar.visible')
+
+
+def test_search_reaches_inside_collections_and_says_where(gallery, page):
+    seed_collection(gallery, page)
+    page.fill('#search', 'deck')
+    page.wait_for_function("() => document.querySelector('.card-collection')")
+    assert shown_cards(page) == ['deck.md']
+    tag = page.locator('.card:has-text("deck.md") .card-collection')
+    assert tag.inner_text() == 'in Category Playbook'
+    page.fill('#search', 'playbook')
+    assert 'Category Playbook' in shown_cards(page)
+
+
+def test_a_type_chip_reaches_inside_collections(gallery, page):
+    seed_collection(gallery, page)
+    page.click('.type-chip[data-ext="md"]')
+    assert sorted(shown_cards(page)) == ['claims.md', 'deck.md', 'loose.md']
+
+
+def test_adding_to_an_existing_collection_moves_from_another(gallery, page):
+    seed_collection(gallery, page)
+    make_collection(gallery, 'Elsewhere', ['loose.md'], color='red')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.collection-card:has-text("Elsewhere")')
+    select(page, 'loose.md')
+    page.click('#add-to-collection-btn')
+    page.wait_for_selector('#collection-dialog.visible')
+    opts = page.locator('.cd-option .cd-option-name').all_inner_texts()
+    # The collection it is already in is not offered.
+    assert opts == ['Category Playbook', 'New collection'], opts
+    page.check('.cd-option:has-text("Category Playbook") input')
+    assert page.locator('#cd-new').is_hidden()
+    assert 'move out of Elsewhere' in page.locator('#cd-note').inner_text()
+    assert page.locator('#cd-submit').inner_text() == 'Add 1 to Category Playbook'
+    page.click('#cd-submit')
+    page.wait_for_selector('#grid-empty:visible')
+    assert page.locator('#grid-empty').inner_text().strip().endswith('This collection is empty')
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    by = {c['name']: c['artifacts'] for c in stored['collections']}
+    assert sorted(by['Category Playbook']) == ['claims.md', 'deck.md', 'loose.md']
+    assert by['Elsewhere'] == []
+
+
+def test_a_duplicate_name_is_caught_in_the_dialog(gallery, page):
+    seed_collection(gallery, page)
+    select(page, 'loose.md')
+    page.click('#add-to-collection-btn')
+    page.fill('#cd-name', '  category   PLAYBOOK ')
+    page.click('#cd-submit')
+    assert 'already a collection called Category Playbook' in page.locator('#cd-error').inner_text()
+    assert page.locator('#collection-dialog.visible').count()
+    page.fill('#cd-name', '')
+    page.click('#cd-submit')
+    assert page.locator('#cd-error').inner_text() == 'Give the collection a name.'
+
+
+def test_a_server_refusal_shows_in_the_dialog(gallery, page):
+    seed_collection(gallery, page)
+    select(page, 'loose.md')
+    page.click('#add-to-collection-btn')
+    page.fill('#cd-name', 'New one')
+    page.route('**/collections/create', lambda r: r.fulfill(
+        status=409, content_type='application/json',
+        body=json.dumps({'error': 'a collection named "品类" already exists'})))
+    page.click('#cd-submit')
+    page.wait_for_function("() => document.getElementById('cd-error').textContent")
+    assert page.locator('#cd-error').inner_text() == 'a collection named "品类" already exists'
+    assert page.locator('#collection-dialog.visible').count()
+
+
+ALL_COMBOS = [(k, p) for k in ('red', 'orange', 'amber', 'green', 'teal', 'blue', 'violet', 'slate')
+              for p in ('dots', 'spots', 'checks', 'grid', 'stripes', 'bars')]
+
+
+def test_shuffle_always_changes_the_combination(gallery, page):
+    """
+    With two combinations left unused, a shuffle that may land on the current
+    one would repeat half the time; ten clicks make that near-certain to show.
+    """
+    gallery.write('a.md', 'x')
+    free = {ALL_COMBOS[5], ALL_COMBOS[30]}
+    for i, (k, p) in enumerate(c for c in ALL_COMBOS if c not in free):
+        make_collection(gallery, f'c{i}', [], color=k, pattern=p)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    select(page, 'a.md')
+    page.click('#add-to-collection-btn')
+    prev = page.locator('#cd-preview')
+    combo = lambda: (prev.get_attribute('data-color'), prev.get_attribute('data-pattern'))
+    last = combo()
+    assert last in free
+    for _ in range(10):
+        page.click('#cd-shuffle')
+        now = combo()
+        assert now != last, ('shuffle kept', now)
+        assert now in free, ('shuffle picked a combination in use', now)
+        last = now
+
+
+def test_the_default_combination_avoids_ones_in_use(gallery, page):
+    gallery.write('a.md', 'x')
+    used = list(ALL_COMBOS)
+    free = used.pop(17)
+    for i, (k, p) in enumerate(used):
+        make_collection(gallery, f'c{i}', [], color=k, pattern=p)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    select(page, 'a.md')
+    page.click('#add-to-collection-btn')
+    prev = page.locator('#cd-preview')
+    assert (prev.get_attribute('data-color'), prev.get_attribute('data-pattern')) == free
+
+
+def test_remove_from_collection_returns_artifacts_home(gallery, page):
+    seed_collection(gallery, page)
+    page.click('.collection-card:has-text("Category Playbook")')
+    page.click('#select-mode-btn')
+    assert page.locator('#remove-from-collection-btn').is_visible()
+    page.check('.card:has-text("deck.md") .select-check')
+    page.click('#remove-from-collection-btn')
+    page.wait_for_function("() => document.querySelector('.collection-count').textContent === '1 artifact'")
+    assert shown_cards(page) == ['claims.md']
+    page.click('.crumb-home')
+    assert 'deck.md' in shown_cards(page)
+    assert (gallery.root / 'deck.md').is_file()
+
+
+def test_deleting_a_collection_keeps_its_files(gallery, page):
+    seed_collection(gallery, page)
+    page.click('.collection-card:has-text("Category Playbook")')
+    prompts = []
+    page.on('dialog', lambda d: (prompts.append(d.message), d.accept()))
+    page.click('#collection-bar .danger')
+    page.wait_for_selector('#collection-bar', state='hidden')
+    assert 'No files are deleted' in prompts[0] and '2 artifacts go back' in prompts[0], prompts
+    assert page.locator('.collection-card').count() == 0
+    assert sorted(shown_cards(page)) == ['claims.md', 'deck.md', 'loose.md', 'other.json']
+    assert (gallery.root / 'deck.md').is_file()
+
+
+def test_cancelling_a_collection_delete_keeps_it(gallery, page):
+    seed_collection(gallery, page)
+    page.click('.collection-card:has-text("Category Playbook")')
+    page.on('dialog', lambda d: d.dismiss())
+    page.click('#collection-bar .danger')
+    page.wait_for_timeout(300)
+    assert page.locator('#collection-bar.visible').count()
+    assert len(json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))['collections']) == 1
+
+
+def test_editing_a_collection_renames_and_recolours_it(gallery, page):
+    seed_collection(gallery, page)
+    page.click('.collection-card:has-text("Category Playbook")')
+    page.click('#collection-bar >> text=Edit collection')
+    page.wait_for_selector('#collection-dialog.visible')
+    assert page.locator('#cd-options').is_hidden()
+    assert page.locator('#cd-name').input_value() == 'Category Playbook'
+    assert page.locator('#cd-colors input[value="blue"]').is_checked()
+    page.fill('#cd-name', 'Playbook v10')
+    page.check('#cd-colors input[value="violet"]')
+    page.check('#cd-patterns input[value="grid"]')
+    assert page.locator('#cd-submit').inner_text() == 'Save changes'
+    page.click('#cd-submit')
+    page.wait_for_function("() => document.getElementById('collection-title').textContent === 'Playbook v10'")
+    sw = page.locator('#collection-swatch')
+    assert (sw.get_attribute('data-color'), sw.get_attribute('data-pattern')) == ('violet', 'grid')
+
+
+def test_escape_closes_the_dialog_without_filing(gallery, page):
+    seed_collection(gallery, page)
+    select(page, 'loose.md')
+    page.click('#add-to-collection-btn')
+    page.fill('#cd-name', 'Never')
+    page.keyboard.press('Escape')
+    assert not page.locator('#collection-dialog.visible').count()
+    assert len(json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))['collections']) == 1
+
+
+def test_an_unsaved_paste_is_saved_when_filed(gallery, page):
+    paste_text(page, '# Scratch notes\n\nkeep me')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    page.click('.back-btn')
+    page.wait_for_selector('#leave-guard.visible')
+    page.click('#guard-stay')
+    page.wait_for_selector('#unsaved-badge:visible')
+    page.evaluate("goHomeWithoutAsking()")
+    select(page, 'scratch-notes.md')
+    page.click('#add-to-collection-btn')
+    page.fill('#cd-name', 'Scratch')
+    page.click('#cd-submit')
+    page.wait_for_selector('.collection-card:has-text("Scratch")')
+    assert (gallery.root / 'scratch-notes.md').is_file()
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    assert stored['collections'][0]['artifacts'] == ['scratch-notes.md']
+
+
+def test_select_mode_acts_only_on_cards_you_can_see(gallery, page):
+    """A card checked and then hidden by a search must not be deleted."""
+    for n in ('keep.md', 'drop.md'):
+        gallery.write(n, 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    select(page, 'keep.md', 'drop.md')
+    page.fill('#search', 'drop')
+    prompts = []
+    page.on('dialog', lambda d: (prompts.append(d.message), d.accept()))
+    page.click('#delete-selected-btn')
+    page.wait_for_function("() => !document.body.innerText.includes('drop.md')", timeout=5000)
+    assert 'keep.md' not in prompts[0], prompts[0]
+    assert (gallery.root / 'keep.md').is_file()
+
+
+def test_a_collection_filed_by_claude_appears_live(gallery, page):
+    gallery.write('deck.md', 'x')
+    page.wait_for_selector('.card:has-text("deck.md")')
+    gallery.get('/notify?file=deck.md&collection=Category%20Playbook')
+    page.wait_for_selector('.collection-card:has-text("Category Playbook")', timeout=10000)
+    page.wait_for_function("() => ![...document.querySelectorAll('#grid .card')]"
+                           ".some(c => c.offsetParent && c.querySelector('.card-name').textContent === 'deck.md')")
+
+
+def test_grouping_puts_collections_in_their_own_foldable_group(gallery, page):
+    seed_collection(gallery, page)
+    page.select_option('#group-select', 'ext')
+    first = page.locator('.group-header').first
+    assert first.get_attribute('data-group') == '__collections__'
+    assert first.locator('.group-name').inner_text() == 'Collections'
+    first.click()
+    assert not page.locator('.collection-card').is_visible()
+    assert 'loose.md' in shown_cards(page)
+
+
+def test_collection_names_are_text_not_markup(gallery, page):
+    gallery.write('a.md', 'x')
+    make_collection(gallery, '<img src=x onerror="window.pwned=1">', ['a.md'])
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.wait_for_selector('.collection-card')
+    assert page.evaluate('window.pwned') is None
+    assert page.locator('.collection-card img').count() == 0
+
+
+def test_an_unreadable_store_is_reported_on_the_page(gallery, page):
+    gallery.write('a.md', 'x')
+    (gallery.root / 'collections.json').write_text('{ nope', encoding='utf-8')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    assert 'Collections could not be loaded' in page.locator('#collections-error').inner_text()
+    assert shown_cards(page) == ['a.md']
 
 
 # ── no console errors anywhere ────────────────────────────────────────
