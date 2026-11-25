@@ -1265,14 +1265,17 @@ def test_listing_never_opens_the_files_it_lists(gallery, monkeypatch):
     import os as _os
     _seed(gallery, 'a.md', 'b.md')
     _create(gallery, 'One', ['a.md'])
-    root = gallery.root.resolve()
-    opened = []
     real_stat = _os.stat
+    norm = lambda s: _os.path.normcase(_os.path.abspath(s))
+    root = norm(str(gallery.root))
+    opened = []
 
+    # Strings only inside the spy: Path.resolve() calls os.stat on some
+    # Pythons (3.12), which recursed into the spy forever on CI.
     def spy(path, *a, **k):
-        p = Path(path)
-        if p.parent.resolve() == root and not p.name.endswith('.link'):
-            opened.append(p.name)
+        s = _os.fspath(path) if not isinstance(path, int) else ''
+        if s and _os.path.dirname(norm(s)) == root and not s.endswith('.link'):
+            opened.append(_os.path.basename(s))
         return real_stat(path, *a, **k)
 
     monkeypatch.setattr(_os, 'stat', spy)
