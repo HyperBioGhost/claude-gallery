@@ -2718,33 +2718,48 @@ def scroll_to(page, y):
     page.wait_for_function(f'Math.abs(window.scrollY - {y}) < 2')
 
 
-def card_under_middle(page):
-    """Name of the card at the centre of the screen, so a click opens it."""
+def card_in_view(page):
+    """
+    The card nearest the middle of the screen and wholly on it: its name,
+    where its centre is, and how far down the screen it sits. A fixed screen
+    point landed between cards on CI, where fonts lay the grid out differently.
+    """
     return page.evaluate("""() => {
-        const el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
-        const card = el && el.closest('.card');
-        return card ? card.querySelector('.card-name').textContent : null;
+        const cards = [...document.querySelectorAll('#grid .card')].filter(c => {
+            const r = c.getBoundingClientRect();
+            return c.offsetParent && r.top >= 0 && r.bottom <= innerHeight; });
+        const mid = innerHeight / 2;
+        cards.sort((a, b) => Math.abs(a.getBoundingClientRect().top - mid) - Math.abs(b.getBoundingClientRect().top - mid));
+        const c = cards[0]; if (!c) return null;
+        const r = c.getBoundingClientRect();
+        return { name: c.querySelector('.card-name').textContent,
+                 x: r.left + r.width / 2, y: r.top + r.height / 2, top: r.top };
     }""")
+
+
+def open_card_in_view(page):
+    card = card_in_view(page)
+    assert card, 'no card wholly on screen'
+    page.mouse.click(card['x'], card['y'])
+    page.wait_for_selector('#detail-view.visible')
+    return card
 
 
 def test_back_returns_to_where_the_grid_was_left(gallery, page):
     many(gallery, page)
     scroll_to(page, 1500)
-    name = card_under_middle(page)
-    assert name, 'no card under the middle of the screen'
-    page.mouse.click(640, 400)
-    page.wait_for_selector('#detail-view.visible')
+    before = open_card_in_view(page)
     page.click('.back-btn')
     page.wait_for_selector('#homepage:not(.hidden)')
     assert abs(page.evaluate('window.scrollY') - 1500) < 2
-    assert card_under_middle(page) == name
+    after = card_in_view(page)
+    assert after['name'] == before['name'] and abs(after['top'] - before['top']) < 2, (before, after)
 
 
 def test_escape_also_returns_to_where_the_grid_was_left(gallery, page):
     many(gallery, page)
     scroll_to(page, 1200)
-    page.mouse.click(640, 400)
-    page.wait_for_selector('#detail-view.visible')
+    open_card_in_view(page)
     page.keyboard.press('Escape')
     page.wait_for_selector('#homepage:not(.hidden)')
     assert abs(page.evaluate('window.scrollY') - 1200) < 2
@@ -2754,7 +2769,7 @@ def test_deleting_from_the_artifact_view_returns_to_where_the_grid_was(gallery, 
     """The other way out of an artifact: goHomeWithoutAsking, not goHome."""
     many(gallery, page)
     scroll_to(page, 1500)
-    page.mouse.click(640, 400)
+    open_card_in_view(page)
     page.wait_for_selector('#delete-btn:visible')
     page.on('dialog', lambda d: d.accept())
     page.click('#delete-btn')
@@ -2775,8 +2790,7 @@ def test_leaving_a_collection_returns_to_where_the_homepage_was(gallery, page):
     page.wait_for_selector('#collection-bar.visible')
     assert page.evaluate('window.scrollY') == 0, 'a collection opens at its top'
     scroll_to(page, 600)
-    page.mouse.click(640, 400)
-    page.wait_for_selector('#detail-view.visible')
+    open_card_in_view(page)
     page.click('.back-btn')
     page.wait_for_selector('#collection-bar.visible')
     assert abs(page.evaluate('window.scrollY') - 600) < 2, 'Back lands where the collection was left'
