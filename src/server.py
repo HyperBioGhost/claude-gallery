@@ -588,10 +588,15 @@ def discard_unsaved(names) -> list:
     return gone
 
 
-# ── Collections ────────────────────────────────────────────────────────
-# collections.json: {"collections": [{"id", "name", "color", "pattern",
-# "created", "artifacts": [names]}]}. An artifact belongs to at most one
-# collection; adding it to another moves it.
+# ── Collections and pins ───────────────────────────────────────────────
+# collections.json holds both, so moving an artifact between places and
+# dropping its old pin are one write:
+#   {"collections": [{"id", "name", "color", "pattern", "created", "used",
+#                     "artifacts": [names], "pinned": [names]}],
+#    "pinned": [{"artifact": name} | {"collection": id}]}
+# An artifact belongs to at most one collection; adding it to another moves
+# it. A pin belongs to a place: the top-level "pinned" is the homepage's, a
+# collection's "pinned" is its own. Each artifact is pinned where it lives.
 
 class CollectionError(Exception):
     """A request the store refuses, with the HTTP status to answer it with."""
@@ -600,15 +605,19 @@ class CollectionError(Exception):
         self.status = status
 
 
-def load_collections() -> list[dict]:
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def load_store() -> dict:
     """
-    Read the store. A missing file is no collections; an unreadable one raises,
-    because answering "none" would let the next write erase every collection.
+    Read the store. A missing file is an empty store; an unreadable one
+    raises, because answering "empty" would let the next write erase it.
     """
     try:
         text = COLLECTIONS_FILE.read_text(encoding='utf-8')
     except FileNotFoundError:
-        return []
+        return {'collections': [], 'pinned': []}
     try:
         data = json.loads(text)
         items = data['collections']
@@ -621,20 +630,31 @@ def load_collections() -> list[dict]:
     for c in items:
         if not isinstance(c, dict) or not c.get('id') or not c.get('name'):
             continue
+        names = lambda key: [str(n) for n in c.get(key, []) if isinstance(n, str)]
+        created = int(c.get('created') or 0)
         out.append({
             'id': str(c['id']),
             'name': str(c['name']),
             'color': c.get('color') if c.get('color') in COLLECTION_COLORS else COLLECTION_COLORS[-1],
             'pattern': c.get('pattern') if c.get('pattern') in COLLECTION_PATTERNS else COLLECTION_PATTERNS[0],
-            'created': int(c.get('created') or 0),
-            'artifacts': [str(n) for n in c.get('artifacts', []) if isinstance(n, str)],
+            'created': created,
+            'used': int(c.get('used') or created),
+            'artifacts': names('artifacts'),
+            'pinned': names('pinned'),
         })
-    return out
+    pins = []
+    for p in data.get('pinned', []) if isinstance(data.get('pinned'), list) else []:
+        if isinstance(p, dict) and isinstance(p.get('artifact'), str):
+            pins.append({'artifact': p['artifact']})
+        elif isinstance(p, dict) and isinstance(p.get('collection'), str):
+            pins.append({'collection': p['collection']})
+    return {'collections': out, 'pinned': pins}
 
 
-def save_collections(items: list[dict]) -> None:
-    atomic_write_text(COLLECTIONS_FILE,
-                      json.dumps({'collections': items}, indent=2, ensure_ascii=False))
+def save_store(store: dict) -> None:
+    atomic_write_text(COLLECTIONS_FILE, json.dumps(
+        {'collections': store['collections'], 'pinned': store['pinned']},
+        indent=2, ensure_ascii=False))
 
 
 def clean_collection_name(raw) -> str:
@@ -653,6 +673,11 @@ def find_collection(items: list[dict], *, cid=None, name=None):
         if name is not None and c['name'].casefold() == name.casefold():
             return c
     return None
+
+
+def home_of(store: dict, name: str):
+    """The collection an artifact lives in, or None for the homepage."""
+    return next((c for c in store['collections'] if name in c['artifacts']), None)
 
 
 def registered_names() -> set:
@@ -674,16 +699,29 @@ def check_members(names) -> list[str]:
     return list(dict.fromkeys(names))
 
 
-def file_into(items: list[dict], target: dict, names: list[str]) -> None:
-    """Put names in target, taking them out of any other collection."""
-    moving = set(names)
-    for c in items:
+def unpin_everywhere(store: dict, names) -> None:
+    gone = set(names)
+    store['pinned'] = [p for p in store['pinned'] if p.get('artifact') not in gone]
+    for c in store['collections']:
+        c['pinned'] = [n for n in c['pinned'] if n not in gone]
+
+
+def file_into(store: dict, target: dict, names: list[str]) -> None:
+    """
+    Put names in target, taking them out of any other collection. A pin
+    belongs to the place it was made, so a moved artifact arrives unpinned.
+    """
+    moving = set(names) - set(target['artifacts'])
+    unpin_everywhere(store, moving)
+    for c in store['collections']:
         if c is not target:
             c['artifacts'] = [n for n in c['artifacts'] if n not in moving]
     target['artifacts'] += [n for n in names if n not in target['artifacts']]
+    target['used'] = _now_ms()
 
 
-def new_collection(items: list[dict], name: str, color=None, pattern=None) -> dict:
+def new_collection(store: dict, name: str, color=None, pattern=None) -> dict:
+    items = store['collections']
     if find_collection(items, name=name):
         raise CollectionError(409, f'a collection named "{name}" already exists')
     if color is None and pattern is None:
@@ -698,30 +736,66 @@ def new_collection(items: list[dict], name: str, color=None, pattern=None) -> di
         raise CollectionError(400, f'unknown colour "{color}"')
     if pattern not in COLLECTION_PATTERNS:
         raise CollectionError(400, f'unknown pattern "{pattern}"')
+    now = _now_ms()
     c = {'id': 'col_' + secrets.token_hex(6), 'name': name, 'color': color,
-         'pattern': pattern, 'created': int(time.time() * 1000), 'artifacts': []}
+         'pattern': pattern, 'created': now, 'used': now, 'artifacts': [], 'pinned': []}
     items.append(c)
     return c
 
 
-def change_collections(action: str, body: dict) -> list[dict]:
+def change_pins(store: dict, body: dict, pin: bool) -> None:
+    """Pin or unpin artifacts where each one lives, and collections on the homepage."""
+    names = check_members(body.get('artifacts', []))
+    ids = body.get('collections', [])
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        raise CollectionError(400, '"collections" must be a list of ids')
+    missing = [i for i in ids if not find_collection(store['collections'], cid=i)]
+    if missing:
+        raise CollectionError(404, 'no such collection: ' + ', '.join(missing))
+    for n in names:
+        place = home_of(store, n)
+        if place is not None:
+            if pin and n not in place['pinned']:
+                place['pinned'].append(n)
+            elif not pin:
+                place['pinned'] = [x for x in place['pinned'] if x != n]
+        else:
+            entry = {'artifact': n}
+            if pin and entry not in store['pinned']:
+                store['pinned'].append(entry)
+            elif not pin:
+                store['pinned'] = [p for p in store['pinned'] if p != entry]
+    for i in ids:
+        entry = {'collection': i}
+        if pin and entry not in store['pinned']:
+            store['pinned'].append(entry)
+        elif not pin:
+            store['pinned'] = [p for p in store['pinned'] if p != entry]
+
+
+def change_collections(action: str, body: dict) -> dict:
     """Apply one change under the lock and write it. Returns the new store."""
     with _collections_lock:
-        items = load_collections()
+        store = load_store()
+        items = store['collections']
         if action == 'create':
             names = check_members(body.get('artifacts', []))
-            c = new_collection(items, clean_collection_name(body.get('name')),
+            c = new_collection(store, clean_collection_name(body.get('name')),
                                body.get('color'), body.get('pattern'))
-            file_into(items, c, names)
+            file_into(store, c, names)
+        elif action in ('pin', 'unpin'):
+            change_pins(store, body, action == 'pin')
         else:
             c = find_collection(items, cid=body.get('id'))
             if c is None:
                 raise CollectionError(404, 'no such collection')
             if action == 'add':
-                file_into(items, c, check_members(body.get('artifacts', [])))
+                file_into(store, c, check_members(body.get('artifacts', [])))
             elif action == 'remove':
+                # Back on the homepage, unpinned: the pin was the collection's.
                 out = set(body.get('artifacts', []))
                 c['artifacts'] = [n for n in c['artifacts'] if n not in out]
+                c['pinned'] = [n for n in c['pinned'] if n not in out]
             elif action == 'update':
                 if 'name' in body:
                     name = clean_collection_name(body['name'])
@@ -738,48 +812,72 @@ def change_collections(action: str, body: dict) -> list[dict]:
                         raise CollectionError(400, f'unknown pattern "{body["pattern"]}"')
                     c['pattern'] = body['pattern']
             elif action == 'delete':
-                # The collection goes; its artifacts go back to the homepage.
+                # The collection goes; its artifacts go back to the homepage
+                # unpinned, and its own pin on the homepage goes with it.
                 items.remove(c)
+                store['pinned'] = [p for p in store['pinned'] if p.get('collection') != c['id']]
             else:
                 raise CollectionError(404, 'unknown collection action')
-        save_collections(items)
-        log.info('collections: %s %s', action, body.get('name') or body.get('id'))
+        save_store(store)
+        log.info('collections: %s %s', action, body.get('name') or body.get('id') or '')
     announce(COLLECTIONS_EVENT)
-    return items
+    return store
+
+
+def file_by_name(artifact: str, wanted: str) -> dict:
+    """/notify's filing: into the named collection, creating it if new."""
+    name = clean_collection_name(wanted)
+    with _collections_lock:
+        store = load_store()
+        c = find_collection(store['collections'], name=name) or new_collection(store, name)
+        file_into(store, c, check_members([artifact]))
+        save_store(store)
+    announce(COLLECTIONS_EVENT)
+    return c
 
 
 def forget_members(names) -> None:
-    """Deleted artifacts leave their collection with them."""
+    """Deleted artifacts leave their collection and their pins with them."""
     gone = set(names)
     if not gone:
         return
     with _collections_lock:
         try:
-            items = load_collections()
+            store = load_store()
         except CollectionError as e:
             log.error('could not drop deleted artifacts from collections: %s', e)
             return
-        if any(gone & set(c['artifacts']) for c in items):
-            for c in items:
+        held = any(gone & (set(c['artifacts']) | set(c['pinned'])) for c in store['collections'])
+        held = held or any(p.get('artifact') in gone for p in store['pinned'])
+        if held:
+            for c in store['collections']:
                 c['artifacts'] = [n for n in c['artifacts'] if n not in gone]
-            save_collections(items)
+            unpin_everywhere(store, gone)
+            save_store(store)
             announce(COLLECTIONS_EVENT)
 
 
-def collections_view(present: set) -> list[dict]:
+def store_view(present: set) -> dict:
     """
-    The store as the page shows it: only artifacts that still exist. A file
-    removed outside the gallery drops out of view without a write, and comes
-    back if it reappears under the same name.
+    The store as the page shows it: only artifacts that still exist, and pins
+    only where their artifact still lives. A file removed outside the gallery
+    drops out of view without a write, and comes back if it reappears.
     """
     # Read under the writers' lock: on Windows, os.replace onto a file another
     # thread has open is refused, and a read can land mid-replace. The page
     # re-reads /list on every collections event, exactly when writes happen.
     with _collections_lock:
-        items = load_collections()
-    for c in items:
+        store = load_store()
+    filed = set()
+    for c in store['collections']:
         c['artifacts'] = [n for n in c['artifacts'] if n in present]
-    return items
+        c['pinned'] = [n for n in c['pinned'] if n in c['artifacts']]
+        filed |= set(c['artifacts'])
+    ids = {c['id'] for c in store['collections']}
+    store['pinned'] = [p for p in store['pinned']
+                       if (p.get('artifact') in present and p['artifact'] not in filed)
+                       or p.get('collection') in ids]
+    return store
 
 
 def announce(event: str) -> None:
@@ -882,7 +980,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not isinstance(body, dict):
                     raise CollectionError(400, 'expected a JSON object')
                 change_collections(path[len('/collections/'):], body)
-                self._json({'collections': collections_view(registered_names())})
+                self._json(store_view(registered_names()))
             except CollectionError as e:
                 self._fail(e.status, str(e))
             except Exception as e:
@@ -1248,14 +1346,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # there, creating the collection if it does not exist yet.
             if fname and wanted is not None:
                 try:
-                    name = clean_collection_name(wanted)
-                    with _collections_lock:
-                        items = load_collections()
-                        c = find_collection(items, name=name) or new_collection(items, name)
-                        file_into(items, c, check_members([fname]))
-                        save_collections(items)
+                    c = file_by_name(fname, wanted)
                     log.info('notify filed %s into %s', fname, c['name'])
-                    announce(COLLECTIONS_EVENT)
                 except CollectionError as e:
                     self._fail(e.status, str(e)); return
             self._empty_ok()
@@ -1268,6 +1360,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             q: queue.Queue = queue.Queue()
             with _clients_lock:
                 _clients.append(q)
+            # Firefox reports the stream open only once body bytes arrive; with
+            # nothing to say until the 25 s ping, the page's catch-up read on
+            # open waited that long. A comment line opens it at once. Sent after
+            # registering, so nothing announced from here on can be missed.
+            try:
+                self.wfile.write(b': open\n\n')
+                self.wfile.flush()
+            except OSError:
+                with _clients_lock:
+                    _clients.remove(q)
+                return
             try:
                 while True:
                     fname = q.get(timeout=25)
@@ -1290,12 +1393,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             listed = ordered_files()
             reply = {'files': listed}
             try:
-                reply['collections'] = collections_view(
-                    {f['name'] for f in listed if not f.get('unsaved')})
+                reply.update(store_view({f['name'] for f in listed if not f.get('unsaved')}))
             except CollectionError as e:
                 # Shown on the page; the artifacts themselves still list.
-                reply['collections'] = []
-                reply['collections_error'] = str(e)
+                reply.update({'collections': [], 'pinned': [], 'collections_error': str(e)})
             self._json(reply)
 
         elif path == '/version':

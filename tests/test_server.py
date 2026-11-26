@@ -1239,14 +1239,14 @@ def test_every_store_read_holds_the_writers_lock(gallery, monkeypatch):
     unlocked read, so check the invariant itself on every path that reads.
     """
     mod = gallery.mod
-    real = mod.load_collections
+    real = mod.load_store
     held = []
 
     def spy():
         held.append(mod._collections_lock.locked())
         return real()
 
-    monkeypatch.setattr(mod, 'load_collections', spy)
+    monkeypatch.setattr(mod, 'load_store', spy)
     _seed(gallery, 'a.md', 'b.md')
     _create(gallery, 'One', ['a.md'])
     _listing(gallery)
@@ -1324,6 +1324,130 @@ def test_a_lasting_refusal_fails_loudly_and_keeps_the_old_file(gallery, monkeypa
     assert not (gallery.root / 'x.json.tmp').exists()
 
 
+# ── pins ──────────────────────────────────────────────────────────────
+
+def _pin(gallery, artifacts=(), collections=(), unpin=False):
+    return _raw(gallery, 'POST', '/collections/' + ('unpin' if unpin else 'pin'),
+                {'artifacts': list(artifacts), 'collections': list(collections)})
+
+
+def test_an_artifact_is_pinned_where_it_lives(gallery):
+    _seed(gallery, 'loose.md', 'filed.md')
+    _create(gallery, 'One', ['filed.md'])
+    cid = _coll(gallery, 'One')['id']
+    assert _pin(gallery, ['loose.md', 'filed.md'], [cid])[0] == 200
+    view = _listing(gallery)
+    assert view['pinned'] == [{'artifact': 'loose.md'}, {'collection': cid}]
+    assert _coll(gallery, 'One')['pinned'] == ['filed.md']
+
+
+def test_pins_keep_the_order_they_were_made_in(gallery):
+    _seed(gallery, 'a.md', 'b.md', 'c.md')
+    for n in ('c.md', 'a.md', 'b.md'):
+        _pin(gallery, [n])
+    assert [p['artifact'] for p in _listing(gallery)['pinned']] == ['c.md', 'a.md', 'b.md']
+    _pin(gallery, ['a.md'])            # pinning again does not move or repeat it
+    assert [p['artifact'] for p in _listing(gallery)['pinned']] == ['c.md', 'a.md', 'b.md']
+
+
+def test_unpin(gallery):
+    _seed(gallery, 'a.md', 'b.md')
+    _create(gallery, 'One', ['b.md'])
+    cid = _coll(gallery, 'One')['id']
+    _pin(gallery, ['a.md', 'b.md'], [cid])
+    _pin(gallery, ['a.md', 'b.md'], [cid], unpin=True)
+    assert _listing(gallery)['pinned'] == []
+    assert _coll(gallery, 'One')['pinned'] == []
+
+
+def test_a_moved_artifact_leaves_its_pin_behind(gallery):
+    """A pin belongs to the place it was made in."""
+    _seed(gallery, 'a.md', 'b.md')
+    _pin(gallery, ['a.md'])
+    _create(gallery, 'One', ['a.md'])
+    assert _listing(gallery)['pinned'] == []
+    assert _coll(gallery, 'One')['pinned'] == []
+    cid = _coll(gallery, 'One')['id']
+    _pin(gallery, ['a.md'])
+    assert _coll(gallery, 'One')['pinned'] == ['a.md']
+    _create(gallery, 'Two', ['a.md'])
+    assert _coll(gallery, 'One')['pinned'] == [] and _coll(gallery, 'Two')['pinned'] == []
+    two = _coll(gallery, 'Two')['id']
+    _pin(gallery, ['a.md'])
+    gallery.post('/collections/remove', {'id': two, 'artifacts': ['a.md']})
+    assert _coll(gallery, 'Two')['pinned'] == []
+    assert _listing(gallery)['pinned'] == [], 'back on the homepage, unpinned'
+    # The stored file, not just the view: the view hides a stale pin, the file keeps it.
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    assert all(c['pinned'] == [] for c in stored['collections']), stored
+
+
+def test_adding_to_its_own_collection_keeps_the_pin(gallery):
+    _seed(gallery, 'a.md')
+    _create(gallery, 'One', ['a.md'])
+    cid = _coll(gallery, 'One')['id']
+    _pin(gallery, ['a.md'])
+    gallery.post('/collections/add', {'id': cid, 'artifacts': ['a.md']})
+    assert _coll(gallery, 'One')['pinned'] == ['a.md']
+
+
+def test_deleting_a_collection_drops_its_pins(gallery):
+    _seed(gallery, 'a.md')
+    _create(gallery, 'One', ['a.md'])
+    cid = _coll(gallery, 'One')['id']
+    _pin(gallery, ['a.md'], [cid])
+    gallery.post('/collections/delete', {'id': cid})
+    assert _listing(gallery)['pinned'] == []
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    assert stored['pinned'] == [], 'no stale entry left in the file'
+
+
+def test_deleting_an_artifact_drops_its_pin(gallery):
+    _seed(gallery, 'a.md', 'b.md')
+    _create(gallery, 'One', ['b.md'])
+    _pin(gallery, ['a.md', 'b.md'])
+    gallery.post('/delete', {'files': ['a.md', 'b.md']})
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    assert stored['pinned'] == []
+    assert stored['collections'][0]['pinned'] == []
+
+
+def test_pinning_something_unknown_is_refused(gallery):
+    _seed(gallery, 'a.md')
+    assert _pin(gallery, ['ghost.md'])[0] == 400
+    assert _pin(gallery, [], ['col_nope'])[0] == 404
+    name = _paste_text(gallery, 'pasted.md', 'x')['name']
+    status, why, _, _ = _pin(gallery, [name])
+    assert status == 400 and 'save to the gallery first' in why
+    assert _listing(gallery)['pinned'] == []
+
+
+def test_a_collection_records_when_it_was_last_used(gallery):
+    _seed(gallery, 'a.md', 'b.md')
+    _create(gallery, 'One', [])
+    first = _coll(gallery, 'One')['used']
+    time.sleep(0.01)
+    gallery.post('/collections/add', {'id': _coll(gallery, 'One')['id'], 'artifacts': ['a.md']})
+    after_add = _coll(gallery, 'One')['used']
+    assert after_add > first
+    time.sleep(0.01)
+    (gallery.root / 'b.md').write_text('x', encoding='utf-8')
+    gallery.get('/notify?file=b.md&collection=One')
+    assert _coll(gallery, 'One')['used'] > after_add
+
+
+def test_a_store_without_pins_still_reads(gallery):
+    """v2.9.0 wrote no "pinned" and no "used"; it must load as is."""
+    _seed(gallery, 'a.md')
+    (gallery.root / 'collections.json').write_text(json.dumps({'collections': [
+        {'id': 'col_old', 'name': 'Old', 'color': 'red', 'pattern': 'dots',
+         'created': 5, 'artifacts': ['a.md']}]}), encoding='utf-8')
+    view = _listing(gallery)
+    assert view['pinned'] == []
+    c = view['collections'][0]
+    assert (c['pinned'], c['used'], c['artifacts']) == ([], 5, ['a.md'])
+
+
 def test_an_unreadable_store_is_reported_and_never_overwritten(gallery):
     _seed(gallery, 'a.md')
     broken = '{"collections": [ this is not json'
@@ -1337,6 +1461,31 @@ def test_an_unreadable_store_is_reported_and_never_overwritten(gallery):
     assert status == 500 and 'unreadable' in why
     gallery.post('/delete', {'files': ['a.md']})
     assert (gallery.root / 'collections.json').read_text(encoding='utf-8') == broken
+
+
+def test_a_stream_sends_bytes_as_soon_as_it_opens(gallery):
+    """
+    Firefox reports an event stream open only when body bytes arrive. With
+    nothing until the 25 s ping, the page's catch-up read on open was late.
+    """
+    import socket as _socket
+    from urllib.parse import urlparse
+    u = urlparse(gallery.base)
+    with _socket.create_connection((u.hostname, u.port), timeout=5) as sk:
+        sk.sendall(b'GET /events HTTP/1.1\r\nHost: ' + u.netloc.encode() + b'\r\n\r\n')
+        sk.settimeout(2)
+        raw = b''
+        try:
+            while b'\r\n\r\n' not in raw or not raw.split(b'\r\n\r\n', 1)[1]:
+                chunk = sk.recv(4096)
+                if not chunk:
+                    break
+                raw += chunk
+        except _socket.timeout:
+            pass
+    head, _, body = raw.partition(b'\r\n\r\n')
+    assert b'text/event-stream' in head
+    assert body.startswith(b':'), ('no body within 2 s', body)
 
 
 # ── who may ask ───────────────────────────────────────────────────────

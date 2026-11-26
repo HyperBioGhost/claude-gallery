@@ -591,7 +591,7 @@
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
-    margin: 6px 0 10px;
+    margin: 4px 0 24px;
   }
   .collection-bar.visible { display: flex; }
   .crumb-home {
@@ -645,25 +645,93 @@
     margin-bottom: 16px;
     color: var(--ink);
   }
-  .cd-options { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
-  .cd-options[hidden] { display: none; }
+  /* One field finds or creates: the list stays the same size at 200
+     collections, and the most recently used lead when nothing is typed. */
+  .cd-find { margin-bottom: 14px; }
+  .cd-find[hidden] { display: none; }
+  #cd-find {
+    width: 100%;
+    font: 16px var(--sans);
+    padding: 10px 12px;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    color: var(--ink);
+  }
+  #cd-find:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  .cd-results {
+    margin-top: 6px;
+    max-height: 264px;          /* six rows, then it scrolls */
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
   .cd-option {
     display: flex;
     align-items: center;
     gap: 10px;
+    min-height: 44px;
     padding: 8px 10px;
     border: 1px solid transparent;
     border-radius: 8px;
     cursor: pointer;
     font-size: 15px;
     color: var(--ink);
+    flex-shrink: 0;
   }
   .cd-option:hover { background: var(--paper-warm); }
-  .cd-option:has(input:checked) { border-color: var(--ink); }
-  .cd-option input { accent-color: var(--ink); margin: 0; }
+  .cd-option[aria-selected="true"] { border-color: var(--ink); background: var(--paper-warm); }
   .cd-option .cover { width: 24px; height: 24px; border-radius: 4px; flex-shrink: 0; }
+  .cd-option .cd-plus {
+    width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+    display: grid; place-items: center;
+    border: 1px solid var(--ink-soft); color: var(--ink); font-size: 16px; line-height: 1;
+  }
   .cd-option-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-  .cd-option-count { font-size: 13px; color: var(--ink-faint); }
+  /* ink-soft, not ink-faint: on the highlighted row faint measured 4.39:1. */
+  .cd-option-count { font-size: 13px; color: var(--ink-soft); }
+  .cd-hint { font-size: 14px; color: var(--ink-soft); padding: 8px 2px; }
+  .cd-name-row { display: flex; flex-direction: column; gap: 10px; }
+  .cd-name-row[hidden] { display: none; }
+
+  /* Pins: a circle at the card's top-right. Out of the way until the card is
+     hovered or focused; always shown, filled, once pinned. */
+  .card .pin-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 6;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 1px solid var(--rule);
+    background: white;
+    color: var(--ink-soft);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .card .pin-btn svg { width: 15px; height: 15px; }
+  .card:hover .pin-btn, .card .pin-btn:focus-visible { opacity: 1; }
+  .card .pin-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .card .pin-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .card .pin-btn[aria-pressed="true"] {
+    opacity: 1; color: white; background: var(--accent); border-color: var(--accent);
+  }
+  .card .pin-btn[aria-pressed="true"] svg path { fill: currentColor; }
+  body.select-mode .card .pin-btn { display: none; }
+  .card .link-mark { right: 46px; }
+  @media (prefers-reduced-motion: reduce) { .card .pin-btn { transition: none; } }
+
+  /* The pinned area ends at a thin rule across the whole row. */
+  .pin-divider {
+    grid-column: 1 / -1;
+    height: 0;
+    border-top: 1px solid var(--rule);
+    margin: 2px 0;
+  }
   .cd-new { display: flex; flex-direction: column; gap: 10px; }
   .cd-new[hidden] { display: none; }
   .cd-label { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
@@ -1168,16 +1236,6 @@
 <div id="homepage">
   <div class="home-header">
     <h1 class="home-title"><em>Gallery</em></h1>
-    <div class="collection-bar" id="collection-bar">
-      <button class="crumb-home" onclick="openCollection(null)"><span class="crumb-arrow" aria-hidden="true">&#8592;</span>All artifacts</button>
-      <span class="crumb-sep" aria-hidden="true">/</span>
-      <span class="collection-crumb">
-        <span class="cover" id="collection-swatch" aria-hidden="true"></span>
-        <h2 class="collection-title" id="collection-title"></h2>
-      </span>
-      <button class="home-action-btn" onclick="openCollectionDialog('edit')">Edit collection</button>
-      <button class="home-action-btn danger" onclick="deleteOpenCollection()">Delete collection</button>
-    </div>
     <p class="home-sub" id="file-count">Loading artifacts...</p>
     <p class="collections-error" id="collections-error" role="alert"></p>
     <div class="search-wrap">
@@ -1201,12 +1259,25 @@
       <button class="home-action-btn" id="select-mode-btn" onclick="toggleSelectMode()">Select&hellip;</button>
       <button class="home-action-btn" id="add-to-collection-btn" onclick="openCollectionDialog('add')" style="display:none">Add to collection</button>
       <button class="home-action-btn" id="remove-from-collection-btn" onclick="removeSelectedFromCollection()" style="display:none">Remove from collection</button>
+      <button class="home-action-btn" id="pin-selected-btn" onclick="pinSelected()" style="display:none">Pin</button>
       <button class="home-action-btn danger" id="delete-selected-btn" onclick="deleteSelected()" style="display:none">Delete Selected</button>
       <span id="import-status"></span>
       <span class="home-meta">
         <a class="update-pill" id="update-pill" target="_blank" rel="noopener" style="display:none"></a>
         <span class="version-badge" id="version-badge"></span>
       </span>
+    </div>
+    <!-- Under the action row, so the controls above stay put whichever view
+         is open, and the collection's name sits directly over its cards. -->
+    <div class="collection-bar" id="collection-bar">
+      <button class="crumb-home" onclick="openCollection(null)"><span class="crumb-arrow" aria-hidden="true">&#8592;</span>All artifacts</button>
+      <span class="crumb-sep" aria-hidden="true">/</span>
+      <span class="collection-crumb">
+        <span class="cover" id="collection-swatch" aria-hidden="true"></span>
+        <h2 class="collection-title" id="collection-title"></h2>
+      </span>
+      <button class="home-action-btn" onclick="openCollectionDialog('edit')">Edit collection</button>
+      <button class="home-action-btn danger" onclick="deleteOpenCollection()">Delete collection</button>
     </div>
   </div>
   <div class="grid-wrap">
@@ -1284,10 +1355,17 @@
 <div id="collection-dialog" role="dialog" aria-modal="true" aria-labelledby="cd-title">
   <form class="collection-box" id="cd-form" onsubmit="submitCollectionDialog(event)" novalidate>
     <h2 id="cd-title"></h2>
-    <div class="cd-options" id="cd-options"></div>
+    <div class="cd-find" id="cd-find-wrap">
+      <input id="cd-find" type="text" maxlength="60" autocomplete="off" role="combobox"
+             aria-expanded="true" aria-controls="cd-results" aria-autocomplete="list"
+             aria-label="Find or create a collection" placeholder="Find or create a collection">
+      <div class="cd-results" id="cd-results" role="listbox" aria-label="Collections"></div>
+    </div>
     <div class="cd-new" id="cd-new">
-      <label class="cd-label" for="cd-name">Name</label>
-      <input id="cd-name" type="text" maxlength="60" autocomplete="off" placeholder="e.g. Category Playbook">
+      <div class="cd-name-row" id="cd-name-row">
+        <label class="cd-label" for="cd-name">Name</label>
+        <input id="cd-name" type="text" maxlength="60" autocomplete="off" placeholder="e.g. Category Playbook">
+      </div>
       <div class="cd-preview cover" id="cd-preview" aria-hidden="true"></div>
       <div class="cd-label" id="cd-color-label">Colour</div>
       <div class="cd-swatches" id="cd-colors" role="radiogroup" aria-labelledby="cd-color-label"></div>
@@ -1849,6 +1927,10 @@
   // Collections, as the server keeps them. An artifact is in at most one, and
   // while it is, the homepage shows it only through that collection's card.
   let collections = [];
+  // Pins belong to a place: these are the homepage's ({artifact} or
+  // {collection}); a collection's own pins are in its `pinned`.
+  let homePins = [];
+  let pinnedItems = [];              // the pinned area of the view on screen
   let memberOf = new Map();          // artifact name -> its collection
   let openCollectionId = null;       // null = the homepage
   let filteredCollections = [];      // the collection cards the grid shows
@@ -2068,7 +2150,7 @@
       files.forEach(f => {
         if (f.thumbnail_mtime) thumbnailMtimeByName.set(f.name, f.thumbnail_mtime);
       });
-      setCollections(data.collections || [], data.collections_error || '');
+      setCollections(data.collections || [], data.collections_error || '', data.pinned || []);
       applyFilters();
       renderGrid();
     } catch {
@@ -2166,6 +2248,8 @@
   function getCard(f) {
     const el = getCardNode(f);
     syncCollectionTag(el, f.name);
+    // An unsaved paste is not an artifact yet, so it has nowhere to be pinned.
+    if (!f.unsaved) syncPinButton(el, { artifact: f.name });
     return el;
   }
 
@@ -2211,10 +2295,29 @@
     // so nothing filed away becomes unfindable.
     const browsing = !open && !q && !extFilter;
     if (browsing) shown = shown.filter(f => !memberOf.has(f.name));
-    filtered = shown;
-    filteredCollections = (open || extFilter) ? [] : collections
+    let shownCollections = (open || extFilter) ? [] : collections
       .filter(c => !q || fuzzyMatch(q, c.name))
       .sort((a, b) => a.name.localeCompare(b.name));
+
+    // The pinned area: this place's pins, in the order they were made. Only
+    // while nothing is typed or picked; a search is one list, where pinned
+    // cards keep their filled pin.
+    pinnedItems = [];
+    if (!q && !extFilter) {
+      const fileByName = new Map(shown.map(f => [f.name, f]));
+      const collById = new Map(shownCollections.map(c => [c.id, c]));
+      const pins = open ? open.pinned.map(n => ({ artifact: n })) : homePins;
+      pins.forEach(p => {
+        if (p.artifact && fileByName.has(p.artifact)) pinnedItems.push({ f: fileByName.get(p.artifact) });
+        else if (p.collection && collById.has(p.collection)) pinnedItems.push({ c: collById.get(p.collection) });
+      });
+      const pinnedFiles = new Set(pinnedItems.filter(i => i.f).map(i => i.f.name));
+      const pinnedColls = new Set(pinnedItems.filter(i => i.c).map(i => i.c.id));
+      shown = shown.filter(f => !pinnedFiles.has(f.name));
+      shownCollections = shownCollections.filter(c => !pinnedColls.has(c.id));
+    }
+    filtered = shown;
+    filteredCollections = shownCollections;
 
     renderTypeChips(searchMatched.length, scope);
     renderCounts(scope, browsing);
@@ -2224,7 +2327,8 @@
     const n = scope.length;
     let label = n + ' artifact' + (n !== 1 ? 's' : '');
     if (openCollectionId) label += ' in this collection';
-    let text = (browsing || filtered.length === n) ? label : filtered.length + ' of ' + label;
+    const shownFiles = filtered.length + pinnedItems.filter(i => i.f).length;
+    let text = (browsing || shownFiles === n) ? label : shownFiles + ' of ' + label;
     if (!openCollectionId && collections.length) {
       text += ' · ' + collections.length + ' collection' + (collections.length !== 1 ? 's' : '');
     }
@@ -2358,7 +2462,8 @@
       empty.innerHTML = '<div class="icon">&#8709;</div><div class="msg"></div>';
       grid.appendChild(empty);
     }
-    const nothing = filtered.length === 0 && filteredCollections.length === 0;
+    const nothing = filtered.length === 0 && filteredCollections.length === 0 &&
+                    pinnedItems.length === 0;
     empty.style.display = nothing ? '' : 'none';
     if (nothing) {
       const q = document.getElementById('search').value.trim();
@@ -2386,10 +2491,27 @@
     const rank = new Map();
     const collectionRank = new Map();
     const liveGroups = new Set();
+    let seat = 0;
+    // Pinned first, then a rule, then everything else as it would be.
+    pinnedItems.forEach(it => {
+      if (it.c) collectionRank.set(it.c.id, seat++);
+      else rank.set(it.f.name, seat++);
+    });
+    let divider = document.getElementById('pin-divider');
+    if (!divider) {
+      divider = document.createElement('div');
+      divider.id = 'pin-divider';
+      divider.className = 'pin-divider';
+      divider.setAttribute('role', 'separator');
+      grid.appendChild(divider);
+    }
+    const rest = filtered.length + filteredCollections.length;
+    divider.style.display = pinnedItems.length && rest ? '' : 'none';
+    divider.style.order = seat++;
     if (groupBy === 'none') {
       // Collections lead, like folders.
-      filteredCollections.forEach((c, i) => collectionRank.set(c.id, i));
-      filtered.forEach((f, i) => rank.set(f.name, filteredCollections.length + i));
+      filteredCollections.forEach(c => collectionRank.set(c.id, seat++));
+      filtered.forEach(f => rank.set(f.name, seat++));
     } else {
       const members = new Map();
       filtered.forEach(f => {
@@ -2397,7 +2519,6 @@
         if (!members.has(k)) members.set(k, []);
         members.get(k).push(f);
       });
-      let seat = 0;
       if (filteredCollections.length) {
         const header = groupHeader(COLLECTIONS_GROUP, filteredCollections.length, grid);
         header.style.display = '';
@@ -2466,8 +2587,9 @@
     return openCollectionId ? collections.find(c => c.id === openCollectionId) || null : null;
   }
 
-  function setCollections(list, error) {
+  function setCollections(list, error, pins) {
     collections = list;
+    if (pins) homePins = pins;
     memberOf = new Map();
     collections.forEach(c => c.artifacts.forEach(n => memberOf.set(n, c)));
     // Deleted elsewhere (another tab, or Claude): fall back to the homepage.
@@ -2500,6 +2622,7 @@
       };
       collectionCardById.set(c.id, el);
     }
+    syncPinButton(el, { collection: c.id });
     const cover = el.querySelector('.cover');
     cover.dataset.color = c.color;
     cover.dataset.pattern = c.pattern;
@@ -2510,6 +2633,80 @@
     el.querySelector('.collection-count').textContent = count;
     el.setAttribute('aria-label', 'Open collection ' + c.name + ', ' + count);
     return el;
+  }
+
+  // ── Pins ──────────────────────────────────────────────────────────
+  // Each thing is pinned where it lives: an artifact in its collection, or
+  // on the homepage; a collection on the homepage. So the pin on a card means
+  // the same wherever the card is seen, a search result included.
+
+  const PIN_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" ' +
+    'stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">' +
+    '<path d="M5.5 1.8h5l-.7 4.3 2.4 2.4v1.2H3.8V8.5l2.4-2.4z"/><path d="M8 9.7v4.5"/></svg>';
+
+  function pinPlaceName(target) {
+    if (target.collection) return 'the homepage';
+    const c = memberOf.get(target.artifact);
+    return c ? c.name : 'the homepage';
+  }
+
+  function isPinned(target) {
+    if (target.collection) return homePins.some(p => p.collection === target.collection);
+    const c = memberOf.get(target.artifact);
+    return c ? c.pinned.includes(target.artifact) : homePins.some(p => p.artifact === target.artifact);
+  }
+
+  function syncPinButton(el, target) {
+    let btn = el.querySelector(':scope > .pin-btn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pin-btn';
+      btn.innerHTML = PIN_ICON;
+      btn.onclick = e => { e.stopPropagation(); togglePin(btn._target); };
+      // A collection card opens on Enter; Enter here means the pin.
+      btn.onkeydown = e => e.stopPropagation();
+      el.appendChild(btn);
+    }
+    btn._target = target;
+    const on = isPinned(target);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const label = on ? 'Unpin from ' + pinPlaceName(target)
+                     : 'Pin to the top of ' + pinPlaceName(target);
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+  }
+
+  async function togglePin(target) {
+    const body = target.collection
+      ? { collections: [target.collection], artifacts: [] }
+      : { artifacts: [target.artifact], collections: [] };
+    try {
+      await collectionsRequest(isPinned(target) ? 'unpin' : 'pin', body);
+    } catch (e) { flashStatus('Could not pin: ' + e.message, false); }
+  }
+
+  // Select mode: one button, named for what it will do to the cards ticked.
+  function syncPinSelectedButton() {
+    const btn = document.getElementById('pin-selected-btn');
+    if (!btn) return;
+    btn.style.display = selectMode ? '' : 'none';
+    const names = selectMode ? selectedNames() : [];
+    const all = names.length > 0 && names.every(n => isPinned({ artifact: n }));
+    btn.textContent = all ? 'Unpin' : 'Pin';
+    btn.disabled = names.length === 0 || names.some(n => (files_byName(n) || {}).unsaved);
+    btn.title = btn.disabled && names.length ? 'Save pasted artifacts to the gallery before pinning' : '';
+  }
+
+  async function pinSelected() {
+    const names = selectedNames();
+    if (!names.length) return;
+    const unpin = names.every(n => isPinned({ artifact: n }));
+    try {
+      await collectionsRequest(unpin ? 'unpin' : 'pin', { artifacts: names, collections: [] });
+      toggleSelectMode();
+      flashStatus(names.length + (unpin ? ' unpinned' : ' pinned'), true);
+    } catch (e) { flashStatus('Could not pin: ' + e.message, false); }
   }
 
   // On the homepage, a filed artifact that a search or chip brings up says
@@ -2545,6 +2742,7 @@
 
   function openCollection(id) {
     if (selectMode) toggleSelectMode();
+    rememberScroll();
     openCollectionId = id;
     // The search and the chip were for the view being left.
     document.getElementById('search').value = '';
@@ -2552,7 +2750,9 @@
     syncCollectionBar();
     applyFilters();
     renderGrid();
-    window.scrollTo(0, 0);
+    // A collection opens at its top; going back lands where you left.
+    if (id) scrollByView.delete(id);
+    restoreScroll();
   }
 
   async function collectionsRequest(action, body) {
@@ -2563,9 +2763,10 @@
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.error) || res.statusText || ('HTTP ' + res.status));
-    setCollections(data.collections);
+    setCollections(data.collections, undefined, data.pinned || []);
     applyFilters();
     renderGrid();
+    syncPinSelectedButton();
     return data.collections;
   }
 
@@ -2579,10 +2780,13 @@
 
   // Only what the user can see is acted on: a card checked and then hidden
   // by a search, a fold or another view is left alone.
+  // In the order they are seen, so pinning several keeps them as they were.
   function selectedNames() {
     return [...document.querySelectorAll('.card .select-check:checked')]
-      .filter(c => c.closest('.card').style.display !== 'none')
-      .map(c => c.dataset.name);
+      .map(c => c.closest('.card'))
+      .filter(card => card.style.display !== 'none')
+      .sort((a, b) => (+a.style.order || 0) - (+b.style.order || 0))
+      .map(card => card.querySelector('.select-check').dataset.name);
   }
 
   async function removeSelectedFromCollection() {
@@ -2641,41 +2845,91 @@
     document.getElementById('cd-name').value = mode === 'edit' ? open.name : '';
     document.getElementById('cd-error').textContent = '';
 
-    // Existing collections to add to, then "New collection". Not offered
-    // when editing, nor the collection the artifacts are already in.
-    const opts = document.getElementById('cd-options');
-    opts.innerHTML = '';
-    if (mode === 'add') {
-      collections.filter(c => c !== open)
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .forEach(c => opts.appendChild(targetOption(c.id, c.name, c.artifacts.length, c)));
-      opts.appendChild(targetOption('new', 'New collection', null, null));
-      opts.querySelector('input[value="new"]').checked = true;
-    }
-    opts.hidden = mode !== 'add';
-
+    // Adding: one field finds or creates. Editing: the name field instead.
+    document.getElementById('cd-find-wrap').hidden = mode !== 'add';
+    document.getElementById('cd-name-row').hidden = mode !== 'edit';
+    const find = document.getElementById('cd-find');
+    find.value = '';
     renderSwatches();
-    syncDialog();
+    if (mode === 'add') renderResults(); else syncDialog();
     document.getElementById('collection-dialog').classList.add('visible');
-    document.getElementById('cd-name').focus();
+    (mode === 'add' ? find : document.getElementById('cd-name')).focus();
   }
 
-  function targetOption(value, label, count, c) {
-    const row = document.createElement('label');
-    row.className = 'cd-option';
-    row.innerHTML = '<input type="radio" name="cd-target"><span class="cover" aria-hidden="true"></span>' +
-                    '<span class="cd-option-name"></span><span class="cd-option-count"></span>';
-    const input = row.querySelector('input');
-    input.value = value;
-    input.onchange = syncDialog;
-    const cover = row.querySelector('.cover');
-    if (c) { cover.dataset.color = c.color; cover.dataset.pattern = c.pattern; }
-    else cover.remove();
-    row.querySelector('.cd-option-name').textContent = label;
-    row.querySelector('.cd-option-count').textContent =
-      count === null ? '' : count + ' artifact' + (count !== 1 ? 's' : '');
-    return row;
+  function typedName() {
+    return document.getElementById('cd-find').value.trim().replace(/\s+/g, ' ');
   }
+
+  // Rows for what is typed: matches best first, then "Create", which is
+  // offered unless the exact name exists. Nothing typed: recently used first.
+  function renderResults() {
+    const q = typedName();
+    const open = openCollection_();
+    const lower = q.toLowerCase();
+    const rankOf = c => {
+      const n = c.name.toLowerCase();
+      return n === lower ? 0 : n.startsWith(lower) ? 1 : n.includes(lower) ? 2 : 3;
+    };
+    const pool = collections.filter(c => c !== open && (!q || fuzzyMatch(q, c.name)));
+    pool.sort((a, b) => (q ? rankOf(a) - rankOf(b) : 0) || (b.used || 0) - (a.used || 0) ||
+                        a.name.localeCompare(b.name));
+    const rows = pool.map(c => ({ c }));
+    const exact = collections.some(c => c.name.toLowerCase() === lower);
+    if (q && !exact) rows.push({ create: q });
+    dialog.rows = rows;
+    dialog.active = rows.length ? 0 : -1;
+
+    const box = document.getElementById('cd-results');
+    box.innerHTML = '';
+    rows.forEach((r, i) => {
+      const row = document.createElement('div');
+      row.className = 'cd-option';
+      row.id = 'cd-opt-' + i;
+      row.setAttribute('role', 'option');
+      if (r.c) {
+        row.innerHTML = '<span class="cover" aria-hidden="true"></span>' +
+                        '<span class="cd-option-name"></span><span class="cd-option-count"></span>';
+        const cover = row.querySelector('.cover');
+        cover.dataset.color = r.c.color;
+        cover.dataset.pattern = r.c.pattern;
+        row.querySelector('.cd-option-name').textContent = r.c.name;
+        const k = r.c.artifacts.length;
+        row.querySelector('.cd-option-count').textContent = k + ' artifact' + (k !== 1 ? 's' : '');
+      } else {
+        row.dataset.create = '1';
+        row.innerHTML = '<span class="cd-plus" aria-hidden="true">+</span><span class="cd-option-name"></span>';
+        row.querySelector('.cd-option-name').textContent = 'Create "' + r.create + '"';
+      }
+      row.onmousedown = e => e.preventDefault();      // keep focus in the field
+      row.onclick = () => { dialog.active = i; syncDialog(); };
+      row.ondblclick = () => { dialog.active = i; document.getElementById('cd-form').requestSubmit(); };
+      box.appendChild(row);
+    });
+    if (!rows.length) {
+      const hint = document.createElement('div');
+      hint.className = 'cd-hint';
+      hint.textContent = collections.length && !(collections.length === 1 && open)
+        ? 'No collection matches. Type a new name to create one.'
+        : 'Type a name to create your first collection.';
+      box.appendChild(hint);
+    }
+    syncDialog();
+  }
+
+  function moveActive(step) {
+    if (!dialog || !dialog.rows || !dialog.rows.length) return;
+    const n = dialog.rows.length;
+    dialog.active = (dialog.active + step + n) % n;
+    syncDialog();
+    const el = document.getElementById('cd-opt-' + dialog.active);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  document.getElementById('cd-find').addEventListener('input', () => { if (dialog) renderResults(); });
+  document.getElementById('cd-find').addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveActive(1); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); moveActive(-1); }
+  });
 
   function renderSwatches() {
     const colors = document.getElementById('cd-colors');
@@ -2704,16 +2958,25 @@
     return l;
   }
 
+  // 'edit', 'new', a collection id, or null when nothing can be chosen.
   function dialogTarget() {
-    const picked = document.querySelector('#cd-options input[name="cd-target"]:checked');
-    return picked ? picked.value : 'new';
+    if (dialog.mode === 'edit') return 'edit';
+    const r = (dialog.rows || [])[dialog.active];
+    return !r ? null : r.c ? r.c.id : 'new';
   }
 
   // One place turns the dialog's state into what it shows.
   function syncDialog() {
     if (!dialog) return;
-    const target = dialog.mode === 'edit' ? 'edit' : dialogTarget();
+    const target = dialogTarget();
+    document.querySelectorAll('#cd-results .cd-option').forEach((el, i) => {
+      el.setAttribute('aria-selected', i === dialog.active ? 'true' : 'false');
+    });
+    const find = document.getElementById('cd-find');
+    if (dialog.active >= 0) find.setAttribute('aria-activedescendant', 'cd-opt-' + dialog.active);
+    else find.removeAttribute('aria-activedescendant');
     document.getElementById('cd-new').hidden = target !== 'new' && target !== 'edit';
+    document.getElementById('cd-submit').disabled = target === null;
     document.querySelectorAll('#cd-colors input').forEach(i => { i.checked = i.value === dialog.color; });
     document.querySelectorAll('#cd-patterns input').forEach(i => { i.checked = i.value === dialog.pattern; });
     // Pattern chips show the chosen colour, so the pick is seen as it will look.
@@ -2735,7 +2998,7 @@
     document.getElementById('cd-submit').textContent =
       dialog.mode === 'edit' ? 'Save changes'
       : target === 'new' ? 'Create and add ' + n
-      : 'Add ' + n + ' to ' + (dest ? dest.name : 'collection');
+      : 'Add ' + n + ' to ' + (dest ? dest.name : 'a collection');
   }
 
   function shuffleCombo() {
@@ -2771,16 +3034,20 @@
     if (!dialog) return;
     const err = document.getElementById('cd-error');
     err.textContent = '';
-    const target = dialog.mode === 'edit' ? 'edit' : dialogTarget();
-    const name = document.getElementById('cd-name').value.trim().replace(/\s+/g, ' ');
+    const target = dialogTarget();
+    if (target === null) {
+      err.textContent = 'Type a name to find a collection or create one.';
+      return;
+    }
+    const name = target === 'edit'
+      ? document.getElementById('cd-name').value.trim().replace(/\s+/g, ' ')
+      : typedName();
     if (target === 'new' || target === 'edit') {
       if (!name) { err.textContent = 'Give the collection a name.'; return; }
       const self = target === 'edit' ? openCollection_() : null;
       const clash = collections.find(c => c !== self && c.name.toLowerCase() === name.toLowerCase());
       if (clash) {
-        err.textContent = target === 'new'
-          ? 'There is already a collection called ' + clash.name + '. Pick it above to add to it.'
-          : 'There is already a collection called ' + clash.name + '.';
+        err.textContent = 'There is already a collection called ' + clash.name + '.';
         return;
       }
     }
@@ -3017,6 +3284,11 @@
 
   // ── Search ────────────────────────────────────────────────────────
 
+  // Ticking a card renames the Pin button to what it would now do.
+  document.getElementById('grid').addEventListener('change', e => {
+    if (e.target.classList.contains('select-check')) syncPinSelectedButton();
+  });
+
   document.getElementById('search').addEventListener('input', e => {
     applyFilters();
     renderGrid();
@@ -3033,6 +3305,7 @@
     document.getElementById('delete-selected-btn').style.display = selectMode ? '' : 'none';
     document.getElementById('add-to-collection-btn').style.display = selectMode ? '' : 'none';
     syncCollectionBar();
+    syncPinSelectedButton();
     // Leaving Select mode drops the picks, so the next round starts clean
     // rather than with checks left on cards since hidden.
     if (!selectMode) {
@@ -3089,8 +3362,12 @@
       data.deleted.forEach(n => thumbnailMtimeByName.delete(n));
       // The server drops them from their collection too; mirror it now
       // rather than wait for the event.
-      collections.forEach(c => { c.artifacts = c.artifacts.filter(n => !data.deleted.includes(n)); });
-      setCollections(collections);
+      collections.forEach(c => {
+        c.artifacts = c.artifacts.filter(n => !data.deleted.includes(n));
+        c.pinned = c.pinned.filter(n => !data.deleted.includes(n));
+      });
+      setCollections(collections, undefined,
+                     homePins.filter(p => !data.deleted.includes(p.artifact)));
       applyFilters();
       renderGrid();
       const missed = plain.concat(linkedNames).filter(n => !data.deleted.includes(n));
@@ -3139,6 +3416,10 @@
     if (!activeFile || activeFile.name !== f.name) viewAsExt = null;
     activeFile = f;
     cancelEdit();
+    // Leaving the grid: remember where it was. openDetail also re-opens the
+    // artifact already on screen (View as, Save to gallery); only the first
+    // call, made from the grid, records a position.
+    if (!document.getElementById('homepage').classList.contains('hidden')) rememberScroll();
     document.getElementById('homepage').classList.add('hidden');
     document.getElementById('detail-view').classList.add('visible');
     document.getElementById('detail-filename').textContent = f.name;
@@ -3248,7 +3529,14 @@
     activeFile = null;
     applyFilters();
     renderGrid();
+    restoreScroll();
   }
+
+  // Where each grid was left: the homepage under '', a collection under its
+  // id. Hiding the grid collapses the page, so the browser forgets on its own.
+  const scrollByView = new Map();
+  function rememberScroll() { scrollByView.set(openCollectionId || '', window.scrollY); }
+  function restoreScroll() { window.scrollTo(0, scrollByView.get(openCollectionId || '') || 0); }
 
   async function goHome() {
     viewAsExt = null;
@@ -3268,6 +3556,7 @@
     // Refresh grid in case of changes
     applyFilters();
     renderGrid();
+    restoreScroll();
   }
 
   // ── Preview Renderer ──────────────────────────────────────────────
@@ -3897,6 +4186,10 @@
 
   function connect() {
     const es = new EventSource('/events');
+    // The server only tells streams that are already open. Anything that
+    // happened before this one opened -- during page load, or while the
+    // server was restarting -- was told to nobody, so read the list again.
+    es.onopen = () => { loadFiles(); };
     es.onmessage = e => {
       const data = JSON.parse(e.data);
       if (data.collections) { loadFiles(); return; }

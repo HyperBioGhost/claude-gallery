@@ -2046,6 +2046,11 @@ def shown_cards(page):
         .map(c => c.querySelector('.card-name').textContent)""")
 
 
+def result_names(page):
+    """Collections the finder lists, in order, without the Create row."""
+    return page.locator('#cd-results .cd-option:not([data-create]) .cd-option-name').all_inner_texts()
+
+
 def select(page, *names):
     if not page.locator('body.select-mode').count():
         page.click('#select-mode-btn')
@@ -2061,9 +2066,10 @@ def test_select_offers_collection_actions(gallery, page):
     assert not page.locator('#add-to-collection-btn').is_visible()
     page.click('#select-mode-btn')
     visible = [b for b in ('#select-mode-btn', '#add-to-collection-btn',
-                           '#remove-from-collection-btn', '#delete-selected-btn')
+                           '#remove-from-collection-btn', '#pin-selected-btn', '#delete-selected-btn')
                if page.locator(b).is_visible()]
-    assert visible == ['#select-mode-btn', '#add-to-collection-btn', '#delete-selected-btn']
+    assert visible == ['#select-mode-btn', '#add-to-collection-btn', '#pin-selected-btn',
+                       '#delete-selected-btn']
     assert page.locator('#select-mode-btn').inner_text() == 'Cancel'
 
 
@@ -2076,7 +2082,12 @@ def test_creating_a_collection_files_the_artifacts_under_one_card(gallery, page)
     page.click('#add-to-collection-btn')
     page.wait_for_selector('#collection-dialog.visible')
     assert page.locator('#cd-title').inner_text() == 'Add 2 artifacts to a collection'
-    page.fill('#cd-name', 'Category Playbook')
+    # With no collections yet, the swatches wait for a name.
+    assert page.locator('#cd-new').is_hidden()
+    assert 'first collection' in page.locator('.cd-hint').inner_text()
+    page.fill('#cd-find', 'Category Playbook')
+    assert page.locator('.cd-option[data-create] .cd-option-name').inner_text() == 'Create "Category Playbook"'
+    assert page.locator('#cd-new').is_visible()
     page.check('#cd-colors input[value="teal"]')
     page.check('#cd-patterns input[value="stripes"]')
     page.click('#cd-submit')
@@ -2181,10 +2192,9 @@ def test_adding_to_an_existing_collection_moves_from_another(gallery, page):
     select(page, 'loose.md')
     page.click('#add-to-collection-btn')
     page.wait_for_selector('#collection-dialog.visible')
-    opts = page.locator('.cd-option .cd-option-name').all_inner_texts()
     # The collection it is already in is not offered.
-    assert opts == ['Category Playbook', 'New collection'], opts
-    page.check('.cd-option:has-text("Category Playbook") input')
+    assert result_names(page) == ['Category Playbook'], result_names(page)
+    page.click('.cd-option:has-text("Category Playbook")')
     assert page.locator('#cd-new').is_hidden()
     assert 'move out of Elsewhere' in page.locator('#cd-note').inner_text()
     assert page.locator('#cd-submit').inner_text() == 'Add 1 to Category Playbook'
@@ -2197,10 +2207,23 @@ def test_adding_to_an_existing_collection_moves_from_another(gallery, page):
     assert by['Elsewhere'] == []
 
 
-def test_a_duplicate_name_is_caught_in_the_dialog(gallery, page):
+def test_typing_an_existing_name_offers_it_not_a_duplicate(gallery, page):
     seed_collection(gallery, page)
     select(page, 'loose.md')
     page.click('#add-to-collection-btn')
+    page.fill('#cd-find', '  category   PLAYBOOK ')
+    assert result_names(page) == ['Category Playbook']
+    assert not page.locator('.cd-option[data-create]').count()
+    assert page.locator('#cd-submit').inner_text() == 'Add 1 to Category Playbook'
+
+
+def test_a_rename_onto_another_collection_is_caught(gallery, page):
+    seed_collection(gallery, page)
+    make_collection(gallery, 'Other', [], color='red')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.click('.collection-card:has-text("Other")')
+    page.click('#collection-bar >> text=Edit collection')
     page.fill('#cd-name', '  category   PLAYBOOK ')
     page.click('#cd-submit')
     assert 'already a collection called Category Playbook' in page.locator('#cd-error').inner_text()
@@ -2214,7 +2237,7 @@ def test_a_server_refusal_shows_in_the_dialog(gallery, page):
     seed_collection(gallery, page)
     select(page, 'loose.md')
     page.click('#add-to-collection-btn')
-    page.fill('#cd-name', 'New one')
+    page.fill('#cd-find', 'New one')
     page.route('**/collections/create', lambda r: r.fulfill(
         status=409, content_type='application/json',
         body=json.dumps({'error': 'a collection named "品类" already exists'})))
@@ -2241,6 +2264,7 @@ def test_shuffle_always_changes_the_combination(gallery, page):
     wait_for_app(page)
     select(page, 'a.md')
     page.click('#add-to-collection-btn')
+    page.fill('#cd-find', 'Fresh pile')
     prev = page.locator('#cd-preview')
     combo = lambda: (prev.get_attribute('data-color'), prev.get_attribute('data-pattern'))
     last = combo()
@@ -2309,7 +2333,7 @@ def test_editing_a_collection_renames_and_recolours_it(gallery, page):
     page.click('.collection-card:has-text("Category Playbook")')
     page.click('#collection-bar >> text=Edit collection')
     page.wait_for_selector('#collection-dialog.visible')
-    assert page.locator('#cd-options').is_hidden()
+    assert page.locator('#cd-find-wrap').is_hidden()
     assert page.locator('#cd-name').input_value() == 'Category Playbook'
     assert page.locator('#cd-colors input[value="blue"]').is_checked()
     page.fill('#cd-name', 'Playbook v10')
@@ -2326,7 +2350,7 @@ def test_escape_closes_the_dialog_without_filing(gallery, page):
     seed_collection(gallery, page)
     select(page, 'loose.md')
     page.click('#add-to-collection-btn')
-    page.fill('#cd-name', 'Never')
+    page.fill('#cd-find', 'Never')
     page.keyboard.press('Escape')
     assert not page.locator('#collection-dialog.visible').count()
     assert len(json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))['collections']) == 1
@@ -2342,7 +2366,7 @@ def test_an_unsaved_paste_is_saved_when_filed(gallery, page):
     page.evaluate("goHomeWithoutAsking()")
     select(page, 'scratch-notes.md')
     page.click('#add-to-collection-btn')
-    page.fill('#cd-name', 'Scratch')
+    page.fill('#cd-find', 'Scratch')
     page.click('#cd-submit')
     page.wait_for_selector('.collection-card:has-text("Scratch")')
     assert (gallery.root / 'scratch-notes.md').is_file()
@@ -2375,6 +2399,32 @@ def test_a_collection_filed_by_claude_appears_live(gallery, page):
                            ".some(c => c.offsetParent && c.querySelector('.card-name').textContent === 'deck.md')")
 
 
+def test_an_artifact_sent_while_the_stream_is_down_still_appears(gallery, page):
+    """
+    The server tells only streams already open. Firefox opened its stream
+    after the page had finished loading, so a notify in that gap was lost and
+    the card never came. Here the first stream is refused outright: the file
+    arrives with no stream at all, and must show once the page reconnects.
+    """
+    refused = {'n': 0}
+
+    def first_fails(route):
+        if refused['n'] == 0:
+            refused['n'] += 1
+            route.abort()
+        else:
+            route.continue_()
+
+    page.route('**/events', first_fails)
+    page.reload(wait_until='domcontentloaded')
+    wait_for_app(page)
+    page.wait_for_function('() => true')
+    assert refused['n'] == 1
+    gallery.write('sent-in-the-gap.md', 'x')
+    # The page retries after 3 s; reading the list on reconnect brings it in.
+    page.wait_for_selector('.card:has-text("sent-in-the-gap.md")', timeout=15000)
+
+
 def test_grouping_puts_collections_in_their_own_foldable_group(gallery, page):
     seed_collection(gallery, page)
     page.select_option('#group-select', 'ext')
@@ -2394,6 +2444,345 @@ def test_collection_names_are_text_not_markup(gallery, page):
     page.wait_for_selector('.collection-card')
     assert page.evaluate('window.pwned') is None
     assert page.locator('.collection-card img').count() == 0
+
+
+# ── finding a collection ──────────────────────────────────────────────
+
+def open_finder(gallery, page, collections, select_name='loose.md'):
+    gallery.write(select_name, 'x')
+    for name, artifacts in collections:
+        make_collection(gallery, name, artifacts, color='red')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    select(page, select_name)
+    page.click('#add-to-collection-btn')
+    page.wait_for_selector('#collection-dialog.visible')
+
+
+def test_the_finder_lists_recently_used_first(gallery, page):
+    gallery.write('a.md', 'x')
+    open_finder(gallery, page, [('Oldest', []), ('Middle', []), ('Newest', [])])
+    assert result_names(page) == ['Newest', 'Middle', 'Oldest']
+    page.click('#cd-cancel')
+    oldest = next(c for c in gallery.get('/list')[1]['collections'] if c['name'] == 'Oldest')
+    gallery.post('/collections/add', {'id': oldest['id'], 'artifacts': ['a.md']})
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    select(page, 'loose.md')
+    page.click('#add-to-collection-btn')
+    assert result_names(page) == ['Oldest', 'Newest', 'Middle']
+
+
+def test_typing_narrows_the_list_best_match_first(gallery, page):
+    # Category Playbook is the more recent, so recency alone would list it first.
+    open_finder(gallery, page, [('Playbook v10', []), ('Category Playbook', []), ('Sound beds', [])])
+    page.fill('#cd-find', 'play')
+    # Starts with the text before merely containing it.
+    assert result_names(page) == ['Playbook v10', 'Category Playbook']
+    assert page.locator('.cd-option[data-create] .cd-option-name').inner_text() == 'Create "play"'
+    assert page.locator('.cd-option[aria-selected="true"]').inner_text().startswith('Playbook v10')
+
+
+def test_arrow_keys_and_enter_choose(gallery, page):
+    open_finder(gallery, page, [('Category Playbook', []), ('Playbook v10', [])])
+    page.fill('#cd-find', 'play')
+    page.keyboard.press('ArrowDown')
+    assert page.locator('.cd-option[aria-selected="true"]').inner_text().startswith('Category Playbook')
+    assert page.locator('#cd-submit').inner_text() == 'Add 1 to Category Playbook'
+    page.keyboard.press('Enter')
+    page.wait_for_selector('#collection-dialog', state='hidden')
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    assert next(c for c in stored['collections'] if c['name'] == 'Category Playbook')['artifacts'] == ['loose.md']
+
+
+def test_with_no_match_enter_creates(gallery, page):
+    open_finder(gallery, page, [('Category Playbook', [])])
+    page.fill('#cd-find', 'Sound beds')
+    assert result_names(page) == []
+    assert page.locator('.cd-option[data-create][aria-selected="true"]').count() == 1
+    assert page.locator('#cd-new').is_visible()
+    page.keyboard.press('Enter')
+    page.wait_for_selector('.collection-card:has-text("Sound beds")')
+
+
+def test_the_list_stays_the_same_size_with_many_collections(gallery, page):
+    open_finder(gallery, page, [(f'Pile {i:02d}', []) for i in range(40)])
+    box = page.locator('#cd-results')
+    m = box.evaluate('el => ({ h: el.clientHeight, sh: el.scrollHeight, rows: el.children.length })')
+    assert m['rows'] == 40 and m['h'] <= 270 and m['sh'] > m['h'], m
+    for _ in range(12):
+        page.keyboard.press('ArrowDown')
+    inside = page.evaluate("""() => {
+        const box = document.getElementById('cd-results').getBoundingClientRect();
+        const r = document.querySelector('.cd-option[aria-selected="true"]').getBoundingClientRect();
+        return r.top >= box.top - 1 && r.bottom <= box.bottom + 1; }""")
+    assert inside, 'the chosen row scrolls into view'
+    # The dialog itself still fits on screen.
+    fits = page.evaluate("document.querySelector('.collection-box').getBoundingClientRect().bottom <= innerHeight")
+    assert fits
+
+
+# ── pins ──────────────────────────────────────────────────────────────
+
+def pin_card(page, name):
+    card = page.locator(f'#grid .card:has(.card-name:text-is("{name}"))')
+    card.hover()
+    card.locator('.pin-btn').click()
+
+
+def pinned_area(page):
+    """Names before the dividing line, and whether the line shows."""
+    return page.evaluate("""() => {
+        const line = document.getElementById('pin-divider');
+        const at = line && line.offsetParent !== null ? +line.style.order : -1;
+        const names = [...document.querySelectorAll('#grid .card')]
+            .filter(c => c.offsetParent !== null && +c.style.order < at)
+            .sort((a, b) => +a.style.order - +b.style.order)
+            .map(c => c.querySelector('.card-name').textContent);
+        return { names, line: at >= 0 };
+    }""")
+
+
+def test_pinning_puts_a_card_above_a_dividing_line(gallery, page):
+    for n in ('a.md', 'b.md', 'c.md'):
+        gallery.write(n, 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    assert pinned_area(page) == {'names': [], 'line': False}
+    pin_card(page, 'b.md')
+    page.wait_for_function("() => document.getElementById('pin-divider').offsetParent !== null")
+    pin_card(page, 'c.md')
+    page.wait_for_function("() => document.querySelectorAll('.pin-btn[aria-pressed=true]').length === 2")
+    assert pinned_area(page) == {'names': ['b.md', 'c.md'], 'line': True}
+    assert shown_cards(page).count('b.md') == 1, 'a pinned card is not repeated below'
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    assert pinned_area(page) == {'names': ['b.md', 'c.md'], 'line': True}, 'pins survive a reload'
+
+
+def test_the_dividing_line_is_thin_and_spans_the_row(gallery, page):
+    for n in ('a.md', 'b.md', 'c.md', 'd.md'):
+        gallery.write(n, 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    pin_card(page, 'a.md')
+    page.wait_for_function("() => document.getElementById('pin-divider').offsetParent !== null")
+    m = page.evaluate("""() => { const d = document.getElementById('pin-divider').getBoundingClientRect();
+        const g = document.getElementById('grid').getBoundingClientRect();
+        return { w: d.width, gw: g.width, line: parseFloat(getComputedStyle(document.getElementById('pin-divider')).borderTopWidth) }; }""")
+    assert abs(m['w'] - m['gw']) < 1 and m['line'] == 1, m
+
+
+def test_unpinning_returns_the_card_and_drops_the_line(gallery, page):
+    for n in ('a.md', 'b.md'):
+        gallery.write(n, 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    pin_card(page, 'a.md')
+    page.wait_for_function("() => document.querySelector('.pin-btn[aria-pressed=true]')")
+    pin_card(page, 'a.md')
+    page.wait_for_function("() => !document.querySelector('.pin-btn[aria-pressed=true]')")
+    assert pinned_area(page) == {'names': [], 'line': False}
+    assert sorted(shown_cards(page)) == ['a.md', 'b.md']
+
+
+def test_a_collection_can_be_pinned_and_enter_on_the_pin_does_not_open_it(gallery, page):
+    seed_collection(gallery, page)
+    btn = page.locator('.collection-card .pin-btn')
+    btn.focus()
+    page.keyboard.press('Enter')
+    page.wait_for_function("() => document.querySelector('.collection-card .pin-btn').getAttribute('aria-pressed') === 'true'")
+    assert not page.locator('#collection-bar.visible').count()
+    assert pinned_area(page)['names'] == ['Category Playbook']
+
+
+def test_a_pin_inside_a_collection_stays_in_that_collection(gallery, page):
+    seed_collection(gallery, page)
+    page.click('.collection-card:has-text("Category Playbook")')
+    page.wait_for_selector('#collection-bar.visible')
+    assert 'Category Playbook' in page.locator('.card:has-text("deck.md") .pin-btn').get_attribute('title')
+    pin_card(page, 'deck.md')
+    page.wait_for_function("() => document.getElementById('pin-divider').offsetParent !== null")
+    assert pinned_area(page) == {'names': ['deck.md'], 'line': True}
+    assert page.locator('.card:has-text("deck.md") .pin-btn').get_attribute('aria-pressed') == 'true'
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    assert stored['pinned'] == [] and stored['collections'][0]['pinned'] == ['deck.md']
+    page.click('.crumb-home')
+    page.wait_for_selector('#collection-bar', state='hidden')
+    assert pinned_area(page) == {'names': [], 'line': False}
+
+
+def test_a_search_drops_the_pinned_area_but_keeps_the_mark(gallery, page):
+    for n in ('alpha.md', 'alps.md', 'beta.md'):
+        gallery.write(n, 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    pin_card(page, 'alps.md')
+    page.wait_for_function("() => document.querySelector('.pin-btn[aria-pressed=true]')")
+    page.fill('#search', 'alp')
+    assert pinned_area(page)['line'] is False
+    assert sorted(shown_cards(page)) == ['alpha.md', 'alps.md']
+    pressed = page.locator('.card:has-text("alps.md") .pin-btn')
+    page.mouse.move(2, 2)               # hover reveals any pin; the mark must show without it
+    page.wait_for_timeout(250)
+    assert pressed.get_attribute('aria-pressed') == 'true'
+    # is_visible() counts opacity 0 as visible, so read what is drawn.
+    assert pressed.evaluate('el => getComputedStyle(el).opacity') == '1'
+    other = page.locator('.card:has-text("alpha.md") .pin-btn')
+    assert other.evaluate('el => getComputedStyle(el).opacity') == '0', 'control: an unpinned pin is hidden'
+
+
+def test_select_mode_pins_and_unpins(gallery, page):
+    for n in ('a.md', 'b.md'):
+        gallery.write(n, 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    # Arrives live: last in the page, first on screen, so the two orders differ.
+    gallery.write('z.md', 'x')
+    page.wait_for_selector('.card:has-text("z.md")')
+    select(page, 'a.md', 'z.md')
+    assert page.locator('#pin-selected-btn').inner_text() == 'Pin'
+    on_screen = [n for n in shown_cards(page) if n in ('a.md', 'z.md')]
+    assert on_screen == ['z.md', 'a.md'], on_screen
+    page.click('#pin-selected-btn')
+    page.wait_for_function("() => document.querySelectorAll('.pin-btn[aria-pressed=true]').length === 2")
+    # Several pinned at once keep the order they were seen in.
+    assert pinned_area(page)['names'] == ['z.md', 'a.md']
+    select(page, 'a.md', 'z.md')
+    assert page.locator('#pin-selected-btn').inner_text() == 'Unpin'
+    page.click('#pin-selected-btn')
+    page.wait_for_function("() => !document.querySelector('.pin-btn[aria-pressed=true]')")
+
+
+def test_the_pinned_area_sits_above_the_groups(gallery, page):
+    for n in ('a.md', 'b.json', 'c.md'):
+        gallery.write(n, 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    pin_card(page, 'b.json')
+    page.wait_for_function("() => document.querySelector('.pin-btn[aria-pressed=true]')")
+    page.select_option('#group-select', 'ext')
+    orders = page.evaluate("""() => ({
+        pin: +[...document.querySelectorAll('#grid .card')].find(c => c.querySelector('.card-name').textContent === 'b.json').style.order,
+        line: +document.getElementById('pin-divider').style.order,
+        firstHeader: Math.min(...[...document.querySelectorAll('.group-header')].filter(h => h.offsetParent).map(h => +h.style.order)) })""")
+    assert orders['pin'] < orders['line'] < orders['firstHeader'], orders
+
+
+def test_a_moved_artifact_arrives_unpinned(gallery, page):
+    seed_collection(gallery, page)
+    pin_card(page, 'loose.md')
+    page.wait_for_function("() => document.querySelector('.pin-btn[aria-pressed=true]')")
+    select(page, 'loose.md')
+    page.click('#add-to-collection-btn')
+    page.fill('#cd-find', 'Category')
+    page.keyboard.press('Enter')
+    page.wait_for_selector('#collection-dialog', state='hidden')
+    assert pinned_area(page) == {'names': [], 'line': False}
+    page.click('.collection-card:has-text("Category Playbook")')
+    assert page.locator('.card:has-text("loose.md") .pin-btn').get_attribute('aria-pressed') == 'false'
+
+
+def test_an_unsaved_paste_has_no_pin(gallery, page):
+    paste_text(page, '# Scratch notes\n\nx')
+    page.wait_for_selector('#unsaved-badge:visible', timeout=15000)
+    page.evaluate("goHomeWithoutAsking()")
+    assert page.locator('.card.unsaved .pin-btn').count() == 0
+
+
+def test_the_collection_bar_sits_under_the_action_row(gallery, page):
+    seed_collection(gallery, page)
+    page.click('.collection-card:has-text("Category Playbook")')
+    page.wait_for_selector('#collection-bar.visible')
+    g = page.evaluate("""() => {
+        const r = s => document.querySelector(s).getBoundingClientRect();
+        return { actions: r('.home-actions').bottom, bar: r('#collection-bar').top,
+                 barBottom: r('#collection-bar').bottom, grid: r('#grid').top,
+                 title: r('.home-title').bottom };
+    }""")
+    assert g['actions'] <= g['bar'], g
+    assert g['barBottom'] <= g['grid'], g
+
+
+# ── where the grid was left ───────────────────────────────────────────
+
+def many(gallery, page, n=30, prefix='doc'):
+    for i in range(n):
+        gallery.write(f'{prefix}{i:02d}.md', f'# {i}\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+
+
+def scroll_to(page, y):
+    page.evaluate(f'window.scrollTo(0, {y})')
+    page.wait_for_function(f'Math.abs(window.scrollY - {y}) < 2')
+
+
+def card_under_middle(page):
+    """Name of the card at the centre of the screen, so a click opens it."""
+    return page.evaluate("""() => {
+        const el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+        const card = el && el.closest('.card');
+        return card ? card.querySelector('.card-name').textContent : null;
+    }""")
+
+
+def test_back_returns_to_where_the_grid_was_left(gallery, page):
+    many(gallery, page)
+    scroll_to(page, 1500)
+    name = card_under_middle(page)
+    assert name, 'no card under the middle of the screen'
+    page.mouse.click(640, 400)
+    page.wait_for_selector('#detail-view.visible')
+    page.click('.back-btn')
+    page.wait_for_selector('#homepage:not(.hidden)')
+    assert abs(page.evaluate('window.scrollY') - 1500) < 2
+    assert card_under_middle(page) == name
+
+
+def test_escape_also_returns_to_where_the_grid_was_left(gallery, page):
+    many(gallery, page)
+    scroll_to(page, 1200)
+    page.mouse.click(640, 400)
+    page.wait_for_selector('#detail-view.visible')
+    page.keyboard.press('Escape')
+    page.wait_for_selector('#homepage:not(.hidden)')
+    assert abs(page.evaluate('window.scrollY') - 1200) < 2
+
+
+def test_deleting_from_the_artifact_view_returns_to_where_the_grid_was(gallery, page):
+    """The other way out of an artifact: goHomeWithoutAsking, not goHome."""
+    many(gallery, page)
+    scroll_to(page, 1500)
+    page.mouse.click(640, 400)
+    page.wait_for_selector('#delete-btn:visible')
+    page.on('dialog', lambda d: d.accept())
+    page.click('#delete-btn')
+    page.wait_for_selector('#homepage:not(.hidden)')
+    assert abs(page.evaluate('window.scrollY') - 1500) < 2
+
+
+def test_leaving_a_collection_returns_to_where_the_homepage_was(gallery, page):
+    many(gallery, page, n=24)
+    for i in range(12):
+        gallery.write(f'item{i:02d}.md', 'x')
+    make_collection(gallery, 'Aaa first', [f'item{i:02d}.md' for i in range(12)])
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    # The collection card leads the grid; scroll a little so it stays reachable.
+    scroll_to(page, 300)
+    page.click('.collection-card')
+    page.wait_for_selector('#collection-bar.visible')
+    assert page.evaluate('window.scrollY') == 0, 'a collection opens at its top'
+    scroll_to(page, 600)
+    page.mouse.click(640, 400)
+    page.wait_for_selector('#detail-view.visible')
+    page.click('.back-btn')
+    page.wait_for_selector('#collection-bar.visible')
+    assert abs(page.evaluate('window.scrollY') - 600) < 2, 'Back lands where the collection was left'
+    page.click('.crumb-home')
+    page.wait_for_selector('#collection-bar', state='hidden')
+    assert abs(page.evaluate('window.scrollY') - 300) < 2
 
 
 def test_an_unreadable_store_is_reported_on_the_page(gallery, page):
