@@ -33,6 +33,21 @@ USER_HOME=$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory 2>/dev/null | awk 
 echo "User: $USER_NAME (uid $USER_UID), home $USER_HOME"
 as_user() { sudo -u "$USER_NAME" HOME="$USER_HOME" "$@"; }
 
+# ── Hand back what earlier installers left owned by root ──────────────
+# Up to v2.11.0 this script wrote the person's files as root, so an upgrade
+# writing as them was refused (CI: "cp: ~/ClaudeGallery/gallery.html:
+# Permission denied"), and they could not edit those files themselves. Only
+# root-owned files of the gallery's own are touched.
+for p in "$USER_HOME/.claude" "$USER_HOME/.claude/CLAUDE.md" \
+         "$USER_HOME/Desktop/Gallery Server Starter.command"; do
+  if [ -e "$p" ] && [ "$(stat -f%u "$p")" = 0 ]; then
+    chown "$USER_NAME" "$p" && echo "Gave $p back to $USER_NAME"
+  fi
+done
+if [ -d "$USER_HOME/ClaudeGallery" ]; then
+  find "$USER_HOME/ClaudeGallery" -user 0 -print -exec chown "$USER_NAME" {} + | sed 's/^/Gave back: /'
+fi
+
 set -e
 # ── Their folders and page ────────────────────────────────────────────
 as_user mkdir -p "$USER_HOME/.claude" "$USER_HOME/ClaudeGallery/artifacts"
