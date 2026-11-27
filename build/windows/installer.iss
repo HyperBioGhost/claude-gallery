@@ -37,12 +37,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
 FinishedHeadingLabel=Claude Gallery is successfully installed.
-FinishedLabel=Open Kiro or Claude Code and start generating%n— your artifacts will be shown in the gallery.
+FinishedLabel=Claude Code is set up to send its artifacts here. Other AI tools can too; the README shows how.%nOpen the gallery any time at http://localhost:7477.
 
 [Files]
 Source: "dist\{#AppExeName}";          DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\gallery.html";      DestDir: "{userdocs}\ClaudeGallery"; Flags: ignoreversion
 Source: "..\..\src\inject-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
+Source: "..\..\src\claude-instructions.md"; DestDir: "{app}";             Flags: ignoreversion
 Source: "..\..\src\remove-claude.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\register-task.ps1"; DestDir: "{app}";                  Flags: ignoreversion
 Source: "..\..\src\unregister-task.ps1"; DestDir: "{app}";                Flags: ignoreversion

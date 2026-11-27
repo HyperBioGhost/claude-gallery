@@ -1,42 +1,42 @@
-$claudeDir = Join-Path $env:USERPROFILE '.claude'
-$claudeMd  = Join-Path $claudeDir 'CLAUDE.md'
-$docsBase  = [Environment]::GetFolderPath('MyDocuments')
-$artifacts = Join-Path $docsBase 'ClaudeGallery\artifacts'
+# Puts the Claude Gallery instructions into the user's Claude Code CLAUDE.md.
+#
+# Runs on every install, upgrades included: the block between the gallery
+# markers is replaced, so an upgrade carries new rules. Everything else in the
+# file is left exactly as it was. The text comes from claude-instructions.md,
+# shipped beside this script -- the one copy, also what the README points
+# other AI tools to.
+#
+# Parameters exist so a test can point the script at a scratch folder.
+param(
+    [string]$ClaudeMd = (Join-Path $env:USERPROFILE '.claude\CLAUDE.md'),
+    [string]$Artifacts = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'ClaudeGallery\artifacts'),
+    [string]$Source = (Join-Path $PSScriptRoot 'claude-instructions.md')
+)
+$ErrorActionPreference = 'Stop'
 
-New-Item -Path $claudeDir -ItemType Directory -Force | Out-Null
-New-Item -Path $artifacts -ItemType Directory -Force | Out-Null
+New-Item -Path (Split-Path $ClaudeMd) -ItemType Directory -Force | Out-Null
+New-Item -Path $Artifacts -ItemType Directory -Force | Out-Null
 
-$instructions = @"
+$existing = if (Test-Path $ClaudeMd) { [IO.File]::ReadAllText($ClaudeMd) } else { '' }
+# Follow the file's own line endings, so the block does not mix them in.
+$nl = if ($existing -match "`r`n") { "`r`n" } else { "`n" }
+$body = ([IO.File]::ReadAllText($Source).Trim()) -replace "`r?`n", $nl
+$block = "<!-- claude-gallery-start -->$nl$body$nl<!-- claude-gallery-end -->"
 
-
-<!-- claude-gallery-start -->
-# Claude Gallery
-
-A local artifact viewer is running at http://localhost:7477.
-
-## Starting the gallery (if not running)
-If ``curl.exe -s http://localhost:7477/`` fails (connection refused), start it:
-``Start-Process -FilePath "`$env:LOCALAPPDATA\ClaudeGallery\claude-gallery-server.exe" -WindowStyle Hidden``
-The server runs silently in the background. Do NOT look for a .py file or npm script.
-
-## Sending artifacts to the gallery
-When you generate any viewable output - HTML, SVG, images, charts, code, data files, or anything else worth seeing - do the following automatically, without being asked:
-
-1. Save the file to ~/Documents/ClaudeGallery/artifacts/<filename> (create the folder if it doesn't exist)
-2. Immediately after saving, run: curl.exe -s "http://localhost:7477/notify?file=<filename>"
-   Only when the user asks for it to go in a collection, add &collection=<name> (URL-encoded, e.g. Category%20Playbook). The collection is created if it does not exist. Otherwise leave it out: new artifacts go on the gallery homepage.
-3. Tell the user: "Sent to Claude Gallery."
-
-Gallery types: .html .htm .svg .png .jpg .gif .webp .csv .json .py .js .ts .css .txt .md
-
-## Non-gallery files
-If the output is a binary, archive, or temp file (.zip, .tar, .gz, .exe, etc.) - do NOT put it in the artifacts folder. Ask the user where to save it.
-
-Do NOT open a browser tab. Do NOT assume the artifacts folder is a general-purpose output folder.
-<!-- claude-gallery-end -->
-"@
-
-$existing = if (Test-Path $claudeMd) { Get-Content $claudeMd -Raw -Encoding UTF8 } else { '' }
-if ($existing -notmatch 'claude-gallery-start') {
-    Add-Content -Path $claudeMd -Value $instructions -Encoding UTF8
+$pattern = '<!-- claude-gallery-start -->[\s\S]*?<!-- claude-gallery-end -->'
+if ([regex]::IsMatch($existing, $pattern)) {
+    # Replace the block where it is, so the person's own sections keep their
+    # order and spacing; any extra copy from an old bug is dropped.
+    $state = @{ first = $true }
+    $text = [regex]::Replace($existing, $pattern, {
+        param($m)
+        if ($state.first) { $state.first = $false; $block } else { '' }
+    })
+} else {
+    $kept = $existing.TrimEnd()
+    $text = if ($kept) { $kept + $nl + $nl + $block + $nl } else { $block + $nl }
 }
+
+# UTF-8 without a byte-order mark, which Windows PowerShell 5.1 would add.
+[IO.File]::WriteAllText($ClaudeMd, $text, (New-Object Text.UTF8Encoding($false)))
+Write-Host "Claude Gallery instructions written to $ClaudeMd"

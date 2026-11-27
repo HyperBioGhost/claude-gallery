@@ -13,6 +13,11 @@ jobs:
   test:
     uses: ./.github/workflows/ci.yml
 
+  # An upgrade over the last release must replace the server and Claude's
+  # instructions, not only a fresh install work.
+  installers:
+    uses: ./.github/workflows/installers.yml
+
   # ── Build Windows installer ─────────────────────────────────────────
   build-windows:
     needs: test
@@ -206,7 +211,7 @@ jobs:
 
   # ── Publish release (only if both tests pass) ───────────────────────
   release:
-    needs: [test-windows, test-mac]
+    needs: [test-windows, test-mac, installers]
     runs-on: ubuntu-latest
     permissions:
       contents: write

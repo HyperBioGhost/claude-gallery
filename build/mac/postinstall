@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Claude Gallery postinstall. Runs as root after every install, upgrades too.
+#
+# The installer runs this as root, so nothing here may assume $HOME or $USER
+# are the person's: they are worked out from who is logged in, and every file
+# in their home is written as them, so they own it.
+#
+# Each step is logged to /tmp/claude-gallery-install.log. A step the person
+# needs (their folders, Claude's instructions) fails the install loudly; the
+# server start falls back to the next login and says so.
+set -uo pipefail
+
+LOG=/tmp/claude-gallery-install.log
+exec >>"$LOG" 2>&1
+echo "=== Claude Gallery postinstall $(date) ==="
+
+LABEL=com.claude-gallery.server
+PLIST=/Library/LaunchAgents/$LABEL.plist
+SHARE=/Library/ClaudeGallery
+
+# ── Who is this for ───────────────────────────────────────────────────
+USER_NAME=$(stat -f%Su /dev/console 2>/dev/null || true)
+case "$USER_NAME" in
+  ''|root|loginwindow) USER_NAME="${SUDO_USER:-}" ;;
+esac
+if [ -z "$USER_NAME" ] || [ "$USER_NAME" = root ]; then
+  echo "No logged-in user; per-user setup skipped. It runs at the next install from a user session."
+  exit 0
+fi
+USER_UID=$(id -u "$USER_NAME")
+USER_HOME=$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+[ -n "$USER_HOME" ] || USER_HOME=$(eval echo "~$USER_NAME")
+echo "User: $USER_NAME (uid $USER_UID), home $USER_HOME"
+as_user() { sudo -u "$USER_NAME" HOME="$USER_HOME" "$@"; }
+
+set -e
+# ── Their folders and page ────────────────────────────────────────────
+as_user mkdir -p "$USER_HOME/.claude" "$USER_HOME/ClaudeGallery/artifacts"
+as_user cp "$SHARE/gallery.html" "$USER_HOME/ClaudeGallery/gallery.html"
+
+# ── Claude Code instructions ──────────────────────────────────────────
+# Replace the block between the gallery markers on every install, so an
+# upgrade carries new rules. It is replaced where it sits, so the person's
+# own sections keep their order; with no block yet, it is added at the end.
+CLAUDE_MD="$USER_HOME/.claude/CLAUDE.md"
+as_user bash "$SHARE/update-instructions.sh" "$CLAUDE_MD" "$SHARE/claude-instructions.md"
+echo "Instructions written to $CLAUDE_MD"
+set +e
+
+# ── Restart the server on the new binary ──────────────────────────────
+# An upgrade leaves the old server running the old code; stop it first,
+# whether launchd or the Desktop shortcut started it.
+launchctl bootout "gui/$USER_UID/$LABEL" 2>/dev/null
+launchctl bootout "user/$USER_UID/$LABEL" 2>/dev/null
+pkill -f /usr/local/bin/claude-gallery-server 2>/dev/null
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  pgrep -f /usr/local/bin/claude-gallery-server >/dev/null || break
+  sleep 0.5
+done
+if launchctl bootstrap "gui/$USER_UID" "$PLIST" 2>/dev/null; then
+  echo "Server started in the login session"
+elif launchctl bootstrap "user/$USER_UID" "$PLIST" 2>/dev/null; then
+  echo "Server started in the user session"
+else
+  echo "Could not start the server now; it starts at the next login."
+fi
+
+# ── Desktop shortcut ──────────────────────────────────────────────────
+DESKTOP="$USER_HOME/Desktop/Gallery Server Starter.command"
+as_user tee "$DESKTOP" >/dev/null <<'CMD'
+#!/bin/bash
+if curl -s -o /dev/null http://127.0.0.1:7477/ 2>/dev/null; then
+    open "http://127.0.0.1:7477"
+    exit 0
+fi
+/usr/local/bin/claude-gallery-server &>/dev/null &
+sleep 2
+if curl -s -o /dev/null http://127.0.0.1:7477/ 2>/dev/null; then
+    open "http://127.0.0.1:7477"
+else
+    echo "Gallery server failed to start."
+    echo "Check /tmp/claude-gallery.log for details."
+    read -p "Press Enter to close..."
+fi
+CMD
+as_user chmod +x "$DESKTOP"
+
+echo "=== done ==="
+exit 0

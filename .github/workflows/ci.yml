@@ -48,6 +48,10 @@ jobs:
       - name: Server tests
         run: python -m pytest tests/test_server.py -q
 
+      - name: Installer instruction tests
+        # The Mac script runs here; the Windows one runs in installers.yml.
+        run: python -m pytest tests/test_installers.py -q
+
       - name: Gallery UI tests (${{ matrix.browser }})
         env:
           GALLERY_TEST_BROWSER: ${{ matrix.browser }}

@@ -1,0 +1,114 @@
+name: Installer upgrades
+
+# An install over an older one is the path every teammate takes, and it had
+# never been tested: Claude's instructions were only added when missing, and
+# on a Mac the old server kept running the old code. This installs the latest
+# published release, runs its server, then installs this build over it.
+#
+# Runs when installer files change, on demand, and as a gate in release.yml.
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'build/**'
+      - 'src/inject-claude.ps1'
+      - 'src/claude-instructions.md'
+      - 'tests/test_installers.py'
+      - '.github/workflows/installers.yml'
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac-upgrade:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      NEW_VERSION: 9.9.9
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build this version's .pkg
+        run: |
+          pip install pyinstaller
+          python build/stamp_version.py "$NEW_VERSION"
+          VERSION="$NEW_VERSION" bash build/mac/build-pkg.sh
+      - name: Download the latest published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download --repo "$GITHUB_REPOSITORY" --pattern ClaudeGallery.pkg --dir old
+
+      - name: The person's own CLAUDE.md, with an outdated gallery block
+        run: |
+          mkdir -p ~/.claude
+          printf '%s\n' '# My own rules' '' 'Keep answers short.' '' \
+            '<!-- claude-gallery-start -->' '# Claude Gallery' '' 'An old rule set.' '<!-- claude-gallery-end -->' \
+            '' '## Later rules' '' 'Use British spelling.' > ~/.claude/CLAUDE.md
+
+      - name: Install the old release with its server running, then upgrade
+        # One step: a server started in one step does not outlive it.
+        run: |
+          set -x
+          sudo installer -pkg old/ClaudeGallery.pkg -target /
+          if ! curl -sf http://127.0.0.1:7477/version; then
+            # Older installers could not start it; start it the way the
+            # Desktop shortcut does, detached so it is still there to replace.
+            printf 'import os, subprocess\npid = os.fork()\nif pid == 0:\n    os.setsid()\n    if os.fork() == 0:\n        log = open("/tmp/old-server.log", "w")\n        subprocess.Popen(["/usr/local/bin/claude-gallery-server"], stdout=log, stderr=log, close_fds=True)\n    os._exit(0)\nos.waitpid(pid, 0)\n' > /tmp/start-old.py
+            python3 /tmp/start-old.py
+          fi
+          for i in $(seq 40); do curl -sf http://127.0.0.1:7477/version && break; sleep 0.5; done
+          OLD=$(curl -sf http://127.0.0.1:7477/version)
+          echo "running before the upgrade: $OLD"
+          if echo "$OLD" | grep -q "\"$NEW_VERSION\""; then echo "the old server is already new?"; exit 1; fi
+
+          sudo installer -pkg build/mac/dist/ClaudeGallery.pkg -target /
+
+          NOW=''
+          for i in $(seq 60); do
+            NOW=$(curl -sf http://127.0.0.1:7477/version || true)
+            echo "$NOW" | grep -q "\"$NEW_VERSION\"" && break
+            sleep 0.5
+          done
+          echo "running after the upgrade: $NOW"
+          pgrep -fl claude-gallery-server || true
+          echo "$NOW" | grep -q "\"$NEW_VERSION\"" || { echo "FAIL: the old server is still the one answering"; exit 1; }
+
+      - name: Claude's instructions were replaced and the rest kept
+        run: |
+          f=~/.claude/CLAUDE.md
+          cat "$f"
+          fail() { echo "FAIL: $1"; exit 1; }
+          [ "$(grep -c 'claude-gallery-start' "$f")" = 1 ] || fail "one gallery block"
+          grep -q '&collection=<name>' "$f" || fail "today's rules are in"
+          ! grep -q 'An old rule set' "$f" || fail "the old block is gone"
+          [ "$(head -1 "$f")" = '# My own rules' ] || fail "the person's opening is first"
+          [ "$(tail -1 "$f")" = 'Use British spelling.' ] || fail "the person's later section is last"
+          [ "$(stat -f%Su "$f")" = "$USER" ] || fail "CLAUDE.md belongs to the person, not root"
+          [ "$(stat -f%Su ~/ClaudeGallery/gallery.html)" = "$USER" ] || fail "gallery.html belongs to the person"
+          grep -q 'function renderExcerpt' ~/ClaudeGallery/gallery.html || fail "the new page was copied"
+          echo "all instruction checks passed"
+
+      - name: Logs
+        if: always()
+        run: |
+          echo "--- install log"; cat /tmp/claude-gallery-install.log 2>/dev/null || echo "(none)"
+          echo "--- server log"; cat /tmp/claude-gallery.log 2>/dev/null || echo "(none)"
+          sudo pkill -f claude-gallery-server || true
+
+  windows-instructions:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Instruction tests, Windows PowerShell and the Mac script
+        run: |
+          pip install pytest
+          python -m pytest tests/test_installers.py -q

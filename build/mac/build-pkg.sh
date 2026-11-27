@@ -41,6 +41,10 @@ chmod +x "$STAGE$INSTALL_DIR/open-claude-gallery"
 # Gallery HTML — installed to a fixed system path; postinstall copies to user home
 mkdir -p "$STAGE/Library/ClaudeGallery"
 cp src/gallery.html "$STAGE/Library/ClaudeGallery/"
+# The one copy of the Claude Code instructions, also what the README points
+# other AI tools to; postinstall puts it between the gallery markers.
+cp src/claude-instructions.md "$STAGE/Library/ClaudeGallery/"
+cp build/mac/update-instructions.sh "$STAGE/Library/ClaudeGallery/"
 
 # launchd plist — use ~ which launchd expands to the loading user's home at runtime
 # Do NOT embed $HOME here — this plist is installed system-wide and loaded per-user
@@ -60,79 +64,10 @@ cat > "$STAGE/Library/LaunchAgents/com.claude-gallery.server.plist" <<'PLIST'
 </plist>
 PLIST
 
-echo "▶ Writing postinstall script..."
+echo "▶ Adding postinstall script..."
+# Kept in its own file so it can be read, linted and tested on its own.
 mkdir -p "$OUT_DIR/scripts"
-cat > "$OUT_DIR/scripts/postinstall" <<'SCRIPT'
-#!/usr/bin/env bash
-set -e
-
-CLAUDE_MD="$HOME/.claude/CLAUDE.md"
-mkdir -p "$(dirname "$CLAUDE_MD")"
-mkdir -p "$HOME/ClaudeGallery/artifacts"
-
-# Copy gallery.html from system install location to user home
-cp /Library/ClaudeGallery/gallery.html "$HOME/ClaudeGallery/gallery.html"
-
-MARKER="claude-gallery-start"
-if ! grep -q "$MARKER" "$CLAUDE_MD" 2>/dev/null; then
-  cat >> "$CLAUDE_MD" <<'INSTRUCTIONS'
-
-
-<!-- claude-gallery-start -->
-# Claude Gallery
-
-A local artifact viewer is running at http://localhost:7477.
-
-## Starting the gallery (if not running)
-If `curl -s http://localhost:7477/` fails (connection refused), start it:
-`/usr/local/bin/claude-gallery-server &`
-The server runs silently in the background. Do NOT look for a .py file or npm script.
-
-## Sending artifacts to the gallery
-When you generate any viewable output - HTML, SVG, images, charts, code, data files, or anything else worth seeing - do the following automatically, without being asked:
-
-1. Save the file to `~/ClaudeGallery/artifacts/<filename>` (create the folder if it doesn't exist)
-2. Immediately after saving, run: `curl -s "http://localhost:7477/notify?file=<filename>"`
-   Only when the user asks for it to go in a collection, add `&collection=<name>` (URL-encoded, e.g. `Category%20Playbook`). The collection is created if it does not exist. Otherwise leave it out: new artifacts go on the gallery homepage.
-3. Tell the user: "Sent to Claude Gallery."
-
-Gallery types: .html, .htm, .svg, .png, .jpg, .gif, .webp, .csv, .json, .py, .js, .ts, .css, .txt, .md
-
-## Non-gallery files
-If the output is a binary, archive, or temp file (.zip, .tar, .gz, .exe, etc.) - do NOT put it in the artifacts folder. Ask the user where to save it.
-
-Do NOT open a browser tab. Do NOT assume the artifacts folder is a general-purpose output folder.
-<!-- claude-gallery-end -->
-INSTRUCTIONS
-fi
-
-# Load launchd agent — macOS 13+ uses bootstrap, older versions use load
-PLIST="$HOME/Library/LaunchAgents/com.claude-gallery.server.plist"
-launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || \
-launchctl load -w "$PLIST" 2>/dev/null || true
-
-# Create Desktop shortcut (.command file)
-DESKTOP="$HOME/Desktop/Gallery Server Starter.command"
-cat > "$DESKTOP" <<'CMD'
-#!/bin/bash
-if curl -s -o /dev/null http://127.0.0.1:7477/ 2>/dev/null; then
-    open "http://127.0.0.1:7477"
-    exit 0
-fi
-/usr/local/bin/claude-gallery-server &>/dev/null &
-sleep 2
-if curl -s -o /dev/null http://127.0.0.1:7477/ 2>/dev/null; then
-    open "http://127.0.0.1:7477"
-else
-    echo "Gallery server failed to start."
-    echo "Check /tmp/claude-gallery.log for details."
-    read -p "Press Enter to close..."
-fi
-CMD
-chmod +x "$DESKTOP"
-
-exit 0
-SCRIPT
+cp build/mac/postinstall "$OUT_DIR/scripts/postinstall"
 chmod +x "$OUT_DIR/scripts/postinstall"
 
 cat > "$OUT_DIR/scripts/preremove" <<'SCRIPT'
