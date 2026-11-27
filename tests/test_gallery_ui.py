@@ -210,7 +210,12 @@ def test_save_as_surfaces_a_real_failure(gallery, page):
     page.on('dialog', lambda d: (alerts.append(d.message), d.dismiss()))
     page.click('.card:has-text("doc.md")')
     export_as_is(page)
-    page.wait_for_timeout(600)
+    # Wait for the message itself: a fixed 600 ms missed it late in a long
+    # Firefox run, when the page was slower to answer.
+    for _ in range(50):
+        if alerts:
+            break
+        page.wait_for_timeout(100)
     assert any('boom' in a for a in alerts), alerts
     assert 'Saved to disk' not in page.locator('#save-status').inner_text()
 
@@ -2095,7 +2100,12 @@ def test_creating_a_collection_files_the_artifacts_under_one_card(gallery, page)
     assert not page.locator('#collection-dialog.visible').count()
     assert not page.locator('body.select-mode').count()
     cover = page.locator('.collection-card .cover')
-    assert (cover.get_attribute('data-color'), cover.get_attribute('data-pattern')) == ('teal', 'stripes')
+    # With members, the cover is a collage on the chosen colour; the chosen
+    # pattern is kept for when it is empty.
+    assert cover.get_attribute('data-color') == 'teal'
+    assert 'collage' in cover.get_attribute('class')
+    stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
+    assert (stored['collections'][0]['color'], stored['collections'][0]['pattern']) == ('teal', 'stripes')
     assert page.locator('.collection-card .collection-count').inner_text() == '2 artifacts'
     # Filed artifacts leave the homepage; the loose one stays.
     assert shown_cards(page) == ['Category Playbook', 'loose.md']
@@ -2446,6 +2456,288 @@ def test_collection_names_are_text_not_markup(gallery, page):
     assert page.locator('.collection-card img').count() == 0
 
 
+# ── text cards show the file's opening ────────────────────────────────
+
+def excerpt_of(page, name, timeout=10000):
+    card = page.locator(f'#grid .card:has(.card-name:text-is("{name}"))')
+    card.scroll_into_view_if_needed()
+    page.wait_for_function(
+        """(n) => { const c = [...document.querySelectorAll('#grid .card')]
+              .find(x => x.querySelector('.card-name').textContent === n);
+            return c && c.querySelector('.card-preview[data-excerpt=ready]'); }""", arg=name, timeout=timeout)
+    return card.locator('.card-preview')
+
+
+def test_markdown_shows_its_heading_and_first_paragraph(gallery, page):
+    gallery.write('guide.md', '---\ntitle: x\n---\n\n# Amazon **credentials** guide\n\n'
+                  '```\ncode is skipped\n```\n\nThis covers [Midway](https://x) and `ada`.\n\n## Next\n\nlater')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    p = excerpt_of(page, 'guide.md')
+    assert p.locator('.excerpt-label').inner_text().lower() == 'markdown / document'
+    assert p.locator('.excerpt-title').inner_text() == 'Amazon credentials guide'
+    assert p.locator('.excerpt-body').inner_text() == 'This covers Midway and ada.'
+    assert p.get_attribute('aria-hidden') == 'true'
+
+
+def test_minified_json_is_laid_out(gallery, page):
+    gallery.write('data.json', json.dumps({'name': 'kb', 'items': [{'id': 1}, {'id': 2}]}, separators=(',', ':')))
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    code = excerpt_of(page, 'data.json').locator('.excerpt-code').inner_text()
+    assert len(code.splitlines()) >= 5, code
+    assert '"name": "kb"' in code
+
+
+def test_a_json_cut_off_at_2kb_is_still_laid_out(gallery, page):
+    big = json.dumps({'entries': [{'title': f'entry {i}', 'body': 'x' * 40} for i in range(400)]},
+                     separators=(',', ':'))
+    assert len(big) > 20000
+    gallery.write('big.json', big)
+    ranges = []
+    page.on('request', lambda r: ranges.append(r.headers.get('range')) if r.url.endswith('/files/big.json') else None)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    code = excerpt_of(page, 'big.json').locator('.excerpt-code').inner_text()
+    assert len(code.splitlines()) >= 5 and '"title": "entry 0"' in code, code
+    # Only the opening is read, never the whole file.
+    assert ranges and all(r == 'bytes=0-2047' for r in ranges), ranges
+
+
+def test_csv_shows_its_header_and_first_rows(gallery, page):
+    gallery.write('people.csv', 'City,Name,"Role, team",Email,Extra\nLondon,Lynn,"PM, Ads",l@x,1\n'
+                  'Paris,Ge,Eng,g@x,2\nRome,Jing,Design,j@x,3\nOslo,Kai,Ops,k@x,4\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    t = excerpt_of(page, 'people.csv').locator('.excerpt-table')
+    assert t.locator('th').all_inner_texts() == ['City', 'Name', 'Role, team', 'Email']
+    assert t.locator('tbody tr').count() == 3
+    assert t.locator('tbody tr').first.locator('td').all_inner_texts() == ['London', 'Lynn', 'PM, Ads', 'l@x']
+
+
+def test_code_shows_its_first_lines(gallery, page):
+    gallery.write('tool.py', 'import json\n\n\ndef export(rows):\n    return rows\n' + '\n'.join(f'x{i} = {i}' for i in range(30)))
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    code = excerpt_of(page, 'tool.py').locator('.excerpt-code').inner_text()
+    assert code.startswith('import json') and 'def export(rows):' in code
+    assert len(code.splitlines()) <= 9
+
+
+def test_an_excerpt_is_text_never_markup(gallery, page):
+    gallery.write('evil.md', '# <img src=x onerror="window.pwned=1">Title\n\n<script>window.pwned=2</script> body')
+    gallery.write('evil.py', '"<img src=x onerror=\'window.pwned=3\'>"\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    excerpt_of(page, 'evil.md')
+    py = excerpt_of(page, 'evil.py')
+    assert page.evaluate('window.pwned') is None
+    assert page.locator('.card-preview.excerpt img, .card-preview.excerpt script').count() == 0
+    assert '<img src=x' in py.inner_text()
+
+
+def test_excerpts_are_read_only_once_their_card_is_in_view(gallery, page):
+    for i in range(40):
+        gallery.write(f'note{i:02d}.md', f'# Note {i}\n\nbody {i}')
+    reads = []
+    page.on('request', lambda r: reads.append(r.url) if '/files/note' in r.url else None)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.wait_for_timeout(500)
+    first = len(reads)
+    assert 0 < first < 25, first
+    excerpt_of(page, 'note00.md')   # the oldest, at the bottom
+    assert len(reads) > first
+
+
+def test_saving_a_file_refreshes_its_excerpt(gallery, page):
+    gallery.write('doc.md', '# Old heading\n\nold body')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    assert excerpt_of(page, 'doc.md').locator('.excerpt-title').inner_text() == 'Old heading'
+    open_editor(page, 'doc.md')
+    page.fill('#editor-textarea', '# New heading\n\nnew body')
+    page.click('#save-btn')
+    page.wait_for_function("() => document.getElementById('save-status').textContent.startsWith('Saved')")
+    page.click('#edit-btn')
+    page.click('.back-btn')
+    page.wait_for_function("""() => { const c = [...document.querySelectorAll('#grid .card')]
+        .find(x => x.querySelector('.card-name').textContent === 'doc.md');
+        const t = c && c.querySelector('.excerpt-title'); return t && t.textContent === 'New heading'; }""",
+        timeout=10000)
+
+
+# ── collection covers show their members ──────────────────────────────
+
+PNG_1PX = bytes.fromhex('89504e470d0a1a0a0000000d4948445200000001000000010806000000'
+                        '1f15c4890000000d49444154789c6360f8ffff3f0005fe02fea7d5f2a10000000049454e44ae426082')
+
+
+def cover_tiles(page, name):
+    cover = page.locator(f'.collection-card:has(.card-name:text-is("{name}")) .cover')
+    return cover, cover.locator('.tile')
+
+
+def test_a_collection_cover_is_a_collage_of_its_members(gallery, page):
+    for n in ('a.md', 'b.md', 'c.md', 'd.md'):
+        gallery.write(n, f'# Heading {n}\n\nbody')
+    c = make_collection(gallery, 'Pile', ['a.md', 'b.md', 'c.md', 'd.md'], color='green')
+    gallery.post('/collections/pin', {'artifacts': ['a.md'], 'collections': []})
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    cover, tiles = cover_tiles(page, 'Pile')
+    assert tiles.count() == 3, 'up to three'
+    assert 'collage' in cover.get_attribute('class') and cover.get_attribute('data-pattern') is None
+    # The pinned member leads; then the newest.
+    page.wait_for_function("() => document.querySelector('.collection-card .tile .tile-title').textContent.startsWith('Heading')")
+    titles = tiles.locator('.tile-title').all_inner_texts()
+    assert titles[0] == 'Heading a.md' and titles[1] == 'Heading d.md', titles
+    assert cover.locator('.collage-count').inner_text() == '4 artifacts'
+
+
+def test_an_off_screen_collection_starts_no_captures(gallery, page):
+    """
+    A capture runs the artifact's scripts in a hidden frame, one at a time.
+    Covers off screen queued theirs first and held up the visible ones.
+    """
+    for i in range(12):
+        gallery.write(f'page{i:02d}.html', f'<h1>{i}</h1>')
+        make_collection(gallery, f'c{i:02d}', [f'page{i:02d}.html'])
+    asked = []
+    page.on('request', lambda r: asked.append(json.loads(r.post_data)['file'])
+            if r.url.endswith('/thumb') and r.method == 'POST' else None)
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.wait_for_timeout(800)
+    on_screen = page.evaluate("""() => [...document.querySelectorAll('.collection-card')]
+        .filter(c => { const r = c.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; })
+        .map(c => c.querySelector('.card-name').textContent)""")
+    assert 0 < len(on_screen) < 12, on_screen
+    wanted = set(page.evaluate('[...thumbnailQueued]')) | set(asked)
+    off = {f'page{c[1:]}.html' for c in (f'c{i:02d}' for i in range(12)) if c not in on_screen}
+    assert not (wanted & off), sorted(wanted & off)
+
+
+def test_a_late_excerpt_does_not_bring_back_a_removed_member(gallery, page):
+    gallery.write('a.md', '# A\n\nx')
+    c = make_collection(gallery, 'Pile', ['a.md'])
+    # Hold a.md's excerpt back until the member is gone.
+    page.add_init_script("""(() => { const real = window.fetch;
+        window.fetch = (u, o) => String(u).includes('/files/a.md')
+            ? new Promise(r => setTimeout(() => r(real(u, o)), 1500)) : real(u, o); })()""")
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    gallery.post('/collections/remove', {'id': c['id'], 'artifacts': ['a.md']})
+    page.wait_for_function("() => document.querySelector('.collection-card .cover').dataset.pattern", timeout=5000)
+    page.wait_for_timeout(2500)
+    assert page.locator('.collection-card .tile').count() == 0
+    assert page.locator('.collection-card .cover').get_attribute('data-pattern')
+
+
+def test_a_cover_title_follows_an_edit_made_outside(gallery, page):
+    gallery.write('a.md', '# Old title\n\nx')
+    make_collection(gallery, 'Pile', ['a.md'])
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    page.wait_for_function("() => document.querySelector('.collection-card .tile-title').textContent === 'Old title'")
+    gallery.write('a.md', '# New title\n\nx')      # as Claude would: write, then notify
+    page.wait_for_function("() => document.querySelector('.collection-card .tile-title').textContent === 'New title'",
+                           timeout=8000)
+
+
+def test_an_empty_collection_shows_a_new_pattern_at_once(gallery, page):
+    gallery.write('a.md', 'x')
+    c = make_collection(gallery, 'Empty', [], color='violet', pattern='grid')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    assert page.locator('.collection-card .cover').get_attribute('data-pattern') == 'grid'
+    gallery.post('/collections/update', {'id': c['id'], 'pattern': 'dots'})
+    page.wait_for_function("() => document.querySelector('.collection-card .cover').dataset.pattern === 'dots'",
+                           timeout=8000)
+
+
+def test_a_csv_record_may_span_lines(gallery, page):
+    gallery.write('notes.csv', 'Name,Note\n"Ann","line one\nline two"\nBob,"said ""hi"""\nCy,ok\n')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    t = excerpt_of(page, 'notes.csv').locator('.excerpt-table')
+    rows = [r.locator('td').all_inner_texts() for r in t.locator('tbody tr').all()]
+    assert len(rows) == 3, rows
+    assert rows[0][0] == 'Ann' and 'line one' in rows[0][1] and 'line two' in rows[0][1], rows
+    assert rows[1] == ['Bob', 'said "hi"'], rows
+    assert rows[2] == ['Cy', 'ok'], rows
+
+
+def test_covers_stay_cheap_with_thousands_of_files(gallery, page):
+    """5,000 files and 500 collections took ~194 ms a pass when each cover rescanned every file."""
+    gallery.write('a.md', 'x')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    ms = page.evaluate("""() => {
+        const saved = [files, collections];
+        files = Array.from({ length: 5000 }, (_, i) => ({ name: 'f' + i + '.md', mtime: i }));
+        const cs = Array.from({ length: 500 }, (_, j) => ({ id: 'c' + j, name: 'c' + j, color: 'red',
+            pattern: 'dots', pinned: [], artifacts: Array.from({ length: 10 }, (_, k) => 'f' + (j * 10 + k) + '.md') }));
+        setCollections(cs, undefined, []);
+        const t0 = performance.now();
+        for (let r = 0; r < 3; r++) cs.forEach(c => coverMembers(c));
+        const t = (performance.now() - t0) / 3;
+        files = saved[0]; setCollections(saved[1], undefined, []);
+        return t; }""")
+    assert ms < 25, f'{ms:.1f} ms per pass'
+
+
+def test_tilted_tiles_are_drawn_on_their_own_layer(gallery, page):
+    """
+    GPU Chrome drew a tilted tile's edges as stairs until it was composited
+    on its own layer. Headless browsers rasterise in software and draw both
+    smoothly, so the test can only hold the property that fixes it.
+    """
+    gallery.write('a.md', '# A')
+    make_collection(gallery, 'Pile', ['a.md'])
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    tile = page.locator('.collection-card .tile').first
+    assert tile.evaluate('el => getComputedStyle(el).willChange') == 'transform'
+
+
+def test_a_member_with_a_picture_shows_it(gallery, page):
+    gallery.write('page.html', '<h1>x</h1>')
+    (gallery.root / '.card-thumbnails').mkdir(exist_ok=True)
+    (gallery.root / '.card-thumbnails' / 'page.html.png').write_bytes(PNG_1PX)
+    make_collection(gallery, 'Pics', ['page.html'])
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    cover, tiles = cover_tiles(page, 'Pics')
+    assert tiles.count() == 1 and 'solo' in tiles.first.get_attribute('class')
+    assert '/thumb/page.html.png' in tiles.first.locator('img').get_attribute('src')
+
+
+def test_an_empty_collection_keeps_its_pattern(gallery, page):
+    gallery.write('a.md', 'x')
+    make_collection(gallery, 'Empty', [], color='violet', pattern='grid')
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    cover, tiles = cover_tiles(page, 'Empty')
+    assert tiles.count() == 0
+    assert cover.get_attribute('data-pattern') == 'grid'
+    assert 'collage' not in cover.get_attribute('class')
+
+
+def test_a_cover_follows_its_members(gallery, page):
+    gallery.write('a.md', '# A\n\nx')
+    gallery.write('b.md', '# B\n\nx')
+    c = make_collection(gallery, 'Pile', ['a.md'])
+    page.reload(wait_until='networkidle')
+    wait_for_app(page)
+    cover, tiles = cover_tiles(page, 'Pile')
+    assert tiles.count() == 1
+    gallery.post('/collections/add', {'id': c['id'], 'artifacts': ['b.md']})
+    page.wait_for_function("() => document.querySelectorAll('.collection-card .tile').length === 2", timeout=10000)
+    gallery.post('/collections/remove', {'id': c['id'], 'artifacts': ['a.md', 'b.md']})
+    page.wait_for_function("() => document.querySelector('.collection-card .cover').dataset.pattern", timeout=10000)
+
+
 # ── finding a collection ──────────────────────────────────────────────
 
 def open_finder(gallery, page, collections, select_name='loose.md'):
@@ -2600,11 +2892,11 @@ def test_a_pin_inside_a_collection_stays_in_that_collection(gallery, page):
     seed_collection(gallery, page)
     page.click('.collection-card:has-text("Category Playbook")')
     page.wait_for_selector('#collection-bar.visible')
-    assert 'Category Playbook' in page.locator('.card:has-text("deck.md") .pin-btn').get_attribute('title')
+    assert 'Category Playbook' in page.locator('.card:has(.card-name:text-is("deck.md")) .pin-btn').get_attribute('title')
     pin_card(page, 'deck.md')
     page.wait_for_function("() => document.getElementById('pin-divider').offsetParent !== null")
     assert pinned_area(page) == {'names': ['deck.md'], 'line': True}
-    assert page.locator('.card:has-text("deck.md") .pin-btn').get_attribute('aria-pressed') == 'true'
+    assert page.locator('.card:has(.card-name:text-is("deck.md")) .pin-btn').get_attribute('aria-pressed') == 'true'
     stored = json.loads((gallery.root / 'collections.json').read_text(encoding='utf-8'))
     assert stored['pinned'] == [] and stored['collections'][0]['pinned'] == ['deck.md']
     page.click('.crumb-home')
@@ -2680,7 +2972,7 @@ def test_a_moved_artifact_arrives_unpinned(gallery, page):
     page.wait_for_selector('#collection-dialog', state='hidden')
     assert pinned_area(page) == {'names': [], 'line': False}
     page.click('.collection-card:has-text("Category Playbook")')
-    assert page.locator('.card:has-text("loose.md") .pin-btn').get_attribute('aria-pressed') == 'false'
+    assert page.locator('.card:has(.card-name:text-is("loose.md")) .pin-btn').get_attribute('aria-pressed') == 'false'
 
 
 def test_an_unsaved_paste_has_no_pin(gallery, page):

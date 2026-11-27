@@ -286,6 +286,89 @@
   .type-video { background: oklch(92% 0.06 310); color: oklch(42% 0.16 310); }
   .type-audio { background: oklch(92% 0.07 200); color: oklch(40% 0.14 200); }
 
+  /* ── Text files: a glimpse of the content ─────────────────────── */
+  /* The card is a picture of the file, like an HTML screenshot: the label
+     says what kind of file, the rest is the file's own opening. Decorative
+     for screen readers; the name and type are in the card's footer. */
+  .card-preview.excerpt {
+    display: block;
+    background: var(--paper);
+    padding: 16px 20px;
+    color: oklch(42% 0.015 200);
+    text-align: left;
+  }
+  .excerpt-label {
+    font: 600 9px var(--mono);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: oklch(60% 0.02 160);
+    margin-bottom: 10px;
+  }
+  .excerpt-title {
+    font: 600 19px/1.15 var(--serif);
+    color: oklch(30% 0.03 200);
+    margin-bottom: 8px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .excerpt-body {
+    font: 11px/1.55 var(--sans);
+    color: oklch(52% 0.015 200);
+    max-width: 36ch;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .excerpt-code {
+    font: 10px/1.6 var(--mono);
+    white-space: pre;
+    overflow: hidden;
+    color: oklch(48% 0.015 200);
+    background: none;
+    padding: 0;
+  }
+  .excerpt-code .hljs { background: none; padding: 0; }
+  .excerpt-table { border-collapse: collapse; width: 100%; font: 10px var(--sans); color: oklch(48% 0.015 160); table-layout: fixed; }
+  .excerpt-table th { text-align: left; font-weight: 600; color: oklch(38% 0.03 160); background: oklch(94% 0.012 160); }
+  .excerpt-table th, .excerpt-table td {
+    border-bottom: 1px solid oklch(90% 0.012 160);
+    padding: 6px 7px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* ── Collections: a pile of their own members ──────────────────── */
+  .card-preview.collage { background: var(--t); }
+  .collage .tile {
+    position: absolute;
+    overflow: hidden;
+    background: white;
+    border: 1px solid oklch(90% 0.01 160);
+    box-shadow: 0 3px 10px oklch(25% 0.03 160 / 0.16);
+    padding: 9px 10px;
+    /* Its own layer: GPU Chrome drew the tilted edges unsmoothed, as stairs,
+       until each tile was composited (measured in Chrome 158 at 100% zoom). */
+    will-change: transform;
+  }
+  .collage .tile.pic { padding: 0; }
+  .collage .tile.pic img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+  .collage .tile.left  { width: 46%; height: 117px; left: 8%;  top: 31px; transform: rotate(-7deg); }
+  .collage .tile.right { width: 43%; height: 115px; right: 8%; top: 26px; transform: rotate(7deg); background: oklch(98.5% 0.008 90); }
+  .collage .tile.front { width: 41%; height: 93px;  left: 30%; top: 70px; transform: rotate(-1deg); }
+  .collage .tile.solo  { width: 52%; height: 120px; left: 24%; top: 24px; transform: rotate(-3deg); }
+  .tile-label { font: 600 7px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--c); margin-bottom: 6px; }
+  .tile-title { font: 14px/1.1 var(--serif); color: oklch(30% 0.03 200); overflow-wrap: anywhere;
+                display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .tile-line { height: 2px; background: oklch(90% 0.012 160); margin-top: 6px; width: 90%; }
+  .tile-line.short { width: 55%; }
+  .collage-count {
+    position: absolute; right: 11px; bottom: 10px; z-index: 2;
+    background: oklch(100% 0 0 / 0.94); border: 1px solid oklch(88% 0.01 160); border-radius: 3px;
+    padding: 4px 7px; font: 600 9px var(--mono); letter-spacing: 0.06em; color: oklch(35% 0.03 160);
+  }
+
   /* Media players fill the preview area without overflowing it. */
   .detail-preview > video {
     width: 100%;
@@ -2227,6 +2310,12 @@
       img.src = '/files/' + encodeURIComponent(f.name);
       img.loading = 'lazy';
       preview.appendChild(img);
+    } else if (EXCERPT_KIND[type] && !f.link_error) {
+      // A text file shows its own opening, read once the card is in view.
+      preview.classList.add('excerpt');
+      preview.setAttribute('aria-hidden', 'true');
+      preview.innerHTML = '<div class="excerpt-label">' + EXCERPT_KIND[type] + '</div>';
+      excerptWhenVisible(f, preview);
     } else {
       preview.innerHTML = '<div class="card-icon"><span class="type-badge type-' + type + '">.' + ext + '</span></div>';
     }
@@ -2243,6 +2332,168 @@
     card.appendChild(preview);
     card.appendChild(info);
     return card;
+  }
+
+  // ── Excerpts: the opening of a text file, as its card's picture ────
+
+  // Label per type: what the file is, then what it holds.
+  const EXCERPT_KIND = {
+    md: 'Markdown / document', json: 'JSON / data', py: 'Python / script',
+    js: 'JavaScript / script', ts: 'TypeScript / script', css: 'CSS / styles',
+    csv: 'CSV / table', yaml: 'YAML / config', xml: 'XML / data',
+    mmd: 'Mermaid / diagram', txt: 'Text',
+  };
+  const EXCERPT_LANG = { json: 'json', py: 'python', js: 'javascript', ts: 'typescript',
+                         css: 'css', yaml: 'yaml', xml: 'xml' };
+  const EXCERPT_BYTES = 2048;        // enough for a card; never the whole file
+  const excerptCache = new Map();    // name -> { mtime, text }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // The first bytes only: the server answers Range, so a 40 MB JSON costs
+  // the same 2 KB as a note.
+  async function loadExcerpt(f) {
+    const hit = excerptCache.get(f.name);
+    if (hit && hit.mtime === f.mtime) return hit.text;
+    const res = await fetch('/files/' + encodeURIComponent(f.name),
+                            { headers: { Range: 'bytes=0-' + (EXCERPT_BYTES - 1) } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const buf = await res.arrayBuffer();
+    const text = new TextDecoder('utf-8').decode(buf.slice(0, EXCERPT_BYTES));
+    excerptCache.set(f.name, { mtime: f.mtime, text });
+    return text;
+  }
+
+  function excerptWhenVisible(f, preview) {
+    const observer = new IntersectionObserver((entries, obs) => {
+      if (!entries.some(e => e.isIntersecting)) return;
+      obs.disconnect();
+      loadExcerpt(f).then(text => renderExcerpt(preview, getType(f.name), text, f.name))
+                    .catch(e => console.warn('excerpt failed for', f.name, e));
+    });
+    observer.observe(preview);
+  }
+
+  // Markdown as a reader sees it: the first heading and the first paragraph,
+  // without the syntax.
+  function plainMarkdown(s) {
+    return s.replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+            .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+            .replace(/<[^>]+>/g, '')
+            .replace(/(\*\*|__|\*|_|`)/g, '')
+            .trim();
+  }
+
+  function markdownOpening(text) {
+    const lines = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').split(/\r?\n/);
+    let title = '', body = [], fence = false;
+    for (const raw of lines) {
+      const l = raw.trim();
+      if (l.startsWith('```')) { fence = !fence; continue; }
+      if (fence) continue;
+      const heading = /^#{1,6}\s+/.test(l);
+      if (!title && heading) { title = l.replace(/^#{1,6}\s+/, ''); continue; }
+      if (!l || heading) { if (body.length) break; continue; }
+      if (/^(\||>|<|!\[|---|\*\*\*)/.test(l)) continue;
+      body.push(l.replace(/^([-*+]|\d+\.)\s+/, ''));
+      if (body.join(' ').length > 260) break;
+    }
+    return { title: plainMarkdown(title), body: plainMarkdown(body.join(' ')) };
+  }
+
+  // Lay out JSON that may be cut off mid-way, so a one-line file still reads.
+  function reindentJson(s) {
+    let out = '', depth = 0, inStr = false, esc = false;
+    const nl = () => '\n' + '  '.repeat(depth);
+    for (const ch of s) {
+      if (out.length > 1400) break;
+      if (inStr) {
+        out += ch;
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') { inStr = true; out += ch; }
+      else if (ch === '{' || ch === '[') { depth++; out += ch + nl(); }
+      else if (ch === '}' || ch === ']') { depth = Math.max(0, depth - 1); out += nl() + ch; }
+      else if (ch === ',') out += ',' + nl();
+      else if (ch === ':') out += ': ';
+      else if (!/\s/.test(ch)) out += ch;
+    }
+    return out;
+  }
+
+  // RFC 4180: a quoted field may hold commas, line breaks and "" for a quote,
+  // so records are split by the parser, never by lines first.
+  function csvRows(text, max) {
+    const rows = [];
+    let row = [], cur = '', q = false;
+    const endRow = () => {
+      row.push(cur); cur = '';
+      if (row.some(c => c.trim())) rows.push(row.slice(0, 4).map(c => c.trim()));
+      row = [];
+    };
+    for (let i = 0; i < text.length && rows.length < max; i++) {
+      const ch = text[i];
+      if (q) {
+        if (ch === '"' && text[i + 1] === '"') { cur += '"'; i++; }
+        else if (ch === '"') q = false;
+        else cur += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === ',') { row.push(cur); cur = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        endRow();
+      } else cur += ch;
+    }
+    if (rows.length < max && (cur || row.length)) endRow();
+    return rows;
+  }
+
+  function codeHtml(code, type) {
+    const lang = EXCERPT_LANG[type];
+    if (lang && haveLib('hljs') && hljs.getLanguage(lang)) {
+      try { return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value; } catch {}
+    }
+    return escapeHtml(code);
+  }
+
+  function firstLines(text, n) {
+    return text.replace(/\t/g, '  ').split(/\r?\n/).slice(0, n)
+               .map(l => l.length > 90 ? l.slice(0, 90) : l).join('\n');
+  }
+
+  function renderExcerpt(preview, type, text, name) {
+    const label = '<div class="excerpt-label">' + EXCERPT_KIND[type] + '</div>';
+    let html;
+    if (type === 'md') {
+      const { title, body } = markdownOpening(text);
+      html = '<div class="excerpt-title">' + escapeHtml(title || stemOf(name)) + '</div>' +
+             (body ? '<div class="excerpt-body">' + escapeHtml(body) + '</div>' : '');
+    } else if (type === 'csv') {
+      const rows = csvRows(text, 4);
+      if (rows.length) {
+        const cell = (tag, c) => '<' + tag + '>' + escapeHtml(c) + '</' + tag + '>';
+        html = '<table class="excerpt-table"><thead><tr>' + rows[0].map(c => cell('th', c)).join('') +
+               '</tr></thead><tbody>' + rows.slice(1).map(r => '<tr>' + r.map(c => cell('td', c)).join('') +
+               '</tr>').join('') + '</tbody></table>';
+      }
+    } else {
+      let code = text;
+      if (type === 'json') {
+        try { code = JSON.stringify(JSON.parse(text), null, 2); } catch { code = reindentJson(text); }
+      }
+      html = '<pre class="excerpt-code"><code>' + codeHtml(firstLines(code, 9), type) + '</code></pre>';
+    }
+    preview.innerHTML = label + (html || '');
+    preview.dataset.excerpt = 'ready';
+  }
+
+  function stemOf(name) {
+    return name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
   }
 
   function getCard(f) {
@@ -2625,7 +2876,7 @@
     syncPinButton(el, { collection: c.id });
     const cover = el.querySelector('.cover');
     cover.dataset.color = c.color;
-    cover.dataset.pattern = c.pattern;
+    syncCollage(cover, c);
     const name = el.querySelector('.card-name');
     name.textContent = c.name;
     name.title = c.name;
@@ -2633,6 +2884,124 @@
     el.querySelector('.collection-count').textContent = count;
     el.setAttribute('aria-label', 'Open collection ' + c.name + ', ' + count);
     return el;
+  }
+
+  // ── Collection covers: a glimpse of the members ───────────────────
+
+  const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
+  const TILE_SPOTS = { 1: ['solo'], 2: ['left', 'right'], 3: ['left', 'right', 'front'] };
+
+  // name -> { f, i }, built once per pass over the covers. Scanning every
+  // file for every collection cost ~1.3 s a render at 5,000 files and 500
+  // collections. Rebuilt when the list is replaced or grows, and dropped at
+  // the end of the task, so an in-place update is never read stale.
+  let fileIndexMemo = null;
+  function fileIndex() {
+    if (!fileIndexMemo || fileIndexMemo.of !== files || fileIndexMemo.n !== files.length) {
+      fileIndexMemo = { of: files, n: files.length, map: new Map(files.map((f, i) => [f.name, { f, i }])) };
+      queueMicrotask(() => { fileIndexMemo = null; });
+    }
+    return fileIndexMemo.map;
+  }
+
+  // Up to three, pinned first, then the newest.
+  function coverMembers(c) {
+    const idx = fileIndex();
+    const pinned = c.pinned.map(n => idx.get(n)).filter(Boolean).map(x => x.f);
+    const pinnedSet = new Set(pinned.map(f => f.name));
+    const rest = c.artifacts.map(n => idx.get(n)).filter(x => x && !pinnedSet.has(x.f.name))
+                  .sort((a, b) => a.i - b.i).map(x => x.f);
+    return pinned.concat(rest).slice(0, 3);
+  }
+
+  // The cached opening of a file, only if it is of the version listed now.
+  function freshExcerpt(f) {
+    const hit = excerptCache.get(f.name);
+    return hit && hit.mtime === f.mtime ? hit.text : null;
+  }
+
+  function collageTile(f, spot) {
+    const tile = document.createElement('div');
+    tile.className = 'tile ' + spot;
+    const ext = getExt(f.name), type = getType(f.name);
+    const picture = FRAME_THUMBNAIL_EXT.includes(ext) && thumbnailMtimeByName.has(f.name)
+      ? thumbnailImg(f.name)
+      : IMAGE_EXT.includes(ext) && !f.link_error ? Object.assign(document.createElement('img'),
+          { src: '/files/' + encodeURIComponent(f.name), alt: '', loading: 'lazy' })
+      : null;
+    if (picture) {
+      tile.classList.add('pic');
+      tile.appendChild(picture);
+      return tile;
+    }
+    // No picture yet: what it is and what it is called.
+    const text = type === 'md' ? freshExcerpt(f) : null;
+    const title = text ? (markdownOpening(text).title || stemOf(f.name)) : stemOf(f.name);
+    tile.innerHTML = '<div class="tile-label"></div><div class="tile-title"></div>' +
+                     '<div class="tile-line"></div><div class="tile-line short"></div>';
+    tile.querySelector('.tile-label').textContent = (EXCERPT_KIND[type] || ext || 'file').split(' / ')[0];
+    tile.querySelector('.tile-title').textContent = title;
+    return tile;
+  }
+
+  // Rebuilt only when what it shows changes, so thumbnails do not reload on
+  // every render.
+  function syncCollage(cover, c) {
+    cover.dataset.collection = c.id;
+    const members = coverMembers(c);
+    const key = c.pattern + '#' + c.artifacts.length + '#' +
+      members.map(f => f.name + ':' + f.mtime + ':' + (thumbnailMtimeByName.get(f.name) || '') +
+                       ':' + (freshExcerpt(f) !== null ? 1 : 0)).join('|');
+    if (cover.dataset.collageKey !== key) {
+      cover.dataset.collageKey = key;
+      cover.innerHTML = '';
+      if (!members.length) {
+        // Nothing to show yet: the colour and pattern chosen for it.
+        cover.classList.remove('collage');
+        cover.dataset.pattern = c.pattern;
+      } else {
+        cover.classList.add('collage');
+        delete cover.dataset.pattern;
+        const spots = TILE_SPOTS[members.length];
+        members.forEach((f, i) => cover.appendChild(collageTile(f, spots[i])));
+        const count = document.createElement('div');
+        count.className = 'collage-count';
+        count.textContent = c.artifacts.length + ' artifact' + (c.artifacts.length !== 1 ? 's' : '');
+        cover.appendChild(count);
+      }
+    }
+    watchCover(cover);
+    if (cover._inView) fillCollage(cover);
+  }
+
+  // Covers off screen start nothing: a capture runs the artifact's scripts in
+  // a hidden frame, one at a time, and must not hold up what is on screen.
+  function watchCover(cover) {
+    if (cover._observer) return;
+    cover._observer = new IntersectionObserver(entries => {
+      cover._inView = entries.some(e => e.isIntersecting);
+      if (cover._inView) fillCollage(cover);
+    });
+    cover._observer.observe(cover);
+  }
+
+  // Fill in what the cover lacks: a picture for a page, a heading for a note.
+  // Read against the collection as it is now, so a late reply cannot put
+  // back a member that has since left.
+  function fillCollage(cover) {
+    const current = () => collections.find(x => x.id === cover.dataset.collection);
+    const c = current();
+    if (!c) return;
+    coverMembers(c).forEach(f => {
+      if (FRAME_THUMBNAIL_EXT.includes(getExt(f.name)) && !thumbnailMtimeByName.has(f.name)) {
+        queueThumbnailCapture(f.name, false);
+      } else if (getType(f.name) === 'md' && freshExcerpt(f) === null) {
+        loadExcerpt(f).then(() => {
+          const now = current();
+          if (now && cover.isConnected) syncCollage(cover, now);
+        }).catch(() => {});
+      }
+    });
   }
 
   // ── Pins ──────────────────────────────────────────────────────────
@@ -3082,6 +3451,9 @@
     // renderGrid() appended a second card beside it.
     const cached = cardCache.get(fname);
     if (cached) cached.mtime = -1;
+    // The excerpt is keyed on the date the list last reported, which a save
+    // does not update; drop it so the rebuilt card reads the new content.
+    excerptCache.delete(fname);
     if (FRAME_THUMBNAIL_EXT.includes(getExt(fname))) queueThumbnailCapture(fname, true);
   }
 
@@ -3274,6 +3646,10 @@
 
   // Swap the new capture into the existing card without rebuilding it.
   function showThumbnailOnCard(fname) {
+    // A member of a collection may be on its cover too.
+    const home = memberOf.get(fname);
+    const coverCard = home && collectionCardById.get(home.id);
+    if (coverCard) syncCollage(coverCard.querySelector('.cover'), home);
     const cached = cardCache.get(fname);
     if (!cached) return;
     const preview = cached.el.querySelector('.card-preview');
